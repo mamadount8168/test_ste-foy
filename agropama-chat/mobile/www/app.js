@@ -2,6 +2,8 @@
 // Écran de démarrage de l'APK : mémorise l'adresse du serveur Agropama puis l'ouvre.
 (function () {
   const KEY = 'agropama.server';
+  // Serveur Agropama utilisé par défaut (aucune saisie nécessaire pour les employés).
+  const DEFAULT_SERVER = 'https://agropama-messagerie.onrender.com';
   const form = document.getElementById('form');
   const input = document.getElementById('url');
   const errorBox = document.getElementById('error');
@@ -25,7 +27,7 @@
 
   async function reachable(origin) {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
+    const t = setTimeout(() => ctrl.abort(), 90000); // le serveur gratuit peut mettre ~1 min à se réveiller
     try {
       const res = await fetch(origin + '/api/health', { signal: ctrl.signal, cache: 'no-store' });
       const data = await res.json();
@@ -48,8 +50,14 @@
 
   async function connect(origin, fromForm) {
     loading.hidden = false;
+    loading.textContent = 'Connexion au serveur…';
     form.hidden = true;
-    if (await reachable(origin)) {
+    const slow = setTimeout(() => {
+      loading.textContent = 'Démarrage du serveur, merci de patienter (jusqu\'à 1 minute)…';
+    }, 4000);
+    const ok = await reachable(origin);
+    clearTimeout(slow);
+    if (ok) {
       save(origin);
       window.location.replace(origin + '/');
     } else {
@@ -71,7 +79,7 @@
   });
 
   const params = new URLSearchParams(location.search);
-  const saved = read();
-  if (saved && !params.has('change')) connect(saved, false);
-  else showForm('', saved || '');
+  const saved = read() || DEFAULT_SERVER;
+  if (!params.has('change')) connect(saved, false);
+  else showForm('', saved);
 })();

@@ -88,8 +88,8 @@ Le fichier **`Agropama.apk`** (à la racine de ce dossier) s'installe directemen
 **Installation sur un téléphone**
 1. Copier `Agropama.apk` sur le téléphone (WhatsApp, courriel, câble USB, Google Drive…) et l'ouvrir.
 2. Android demande d'autoriser l'installation d'applications de cette source : accepter.
-3. Au premier lancement, saisir l'adresse du serveur de l'entreprise (ex. `https://messagerie.agropama.com`).
-   Elle est mémorisée ; on peut la changer plus tard dans « Mon profil » → « Changer de serveur ».
+3. L'application se connecte automatiquement au serveur d'essai `https://agropama-messagerie.onrender.com`
+   (adresse définie dans `mobile/www/app.js`, `DEFAULT_SERVER`). On peut la changer dans « Mon profil » → « Changer de serveur ».
 
 > L'APK est l'application que les employés installent ; elle se connecte au **serveur** décrit plus haut,
 > qui doit être en ligne et accessible depuis les téléphones (voir « Mise en production »).
