@@ -80,3 +80,30 @@ agropama-chat/
 ├── public/         # interface web (HTML/CSS/JS sans framework)
 └── test/           # tests d'intégration
 ```
+
+## Application Android (APK)
+
+Le fichier **`Agropama.apk`** (à la racine de ce dossier) s'installe directement sur les téléphones Android (Android 6 ou plus récent).
+
+**Installation sur un téléphone**
+1. Copier `Agropama.apk` sur le téléphone (WhatsApp, courriel, câble USB, Google Drive…) et l'ouvrir.
+2. Android demande d'autoriser l'installation d'applications de cette source : accepter.
+3. Au premier lancement, saisir l'adresse du serveur de l'entreprise (ex. `https://messagerie.agropama.com`).
+   Elle est mémorisée ; on peut la changer plus tard dans « Mon profil » → « Changer de serveur ».
+
+> L'APK est l'application que les employés installent ; elle se connecte au **serveur** décrit plus haut,
+> qui doit être en ligne et accessible depuis les téléphones (voir « Mise en production »).
+> Pour un essai sur le réseau Wi-Fi du bureau, on peut saisir l'adresse locale de l'ordinateur qui fait tourner le serveur,
+> par exemple `http://192.168.1.20:3000`.
+
+**Reconstruire l'APK** (Node.js, Java 21 et le SDK Android requis)
+
+```bash
+cd agropama-chat/mobile
+npm install
+ANDROID_HOME=/chemin/vers/android-sdk npm run apk
+# → android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+L'APK fourni est signé avec une clé de développement : il s'installe sans problème en dehors du Play Store.
+Pour une publication sur le Google Play Store, il faudra générer une version signée avec une clé propre à Agropama.

@@ -418,6 +418,9 @@ function renderConversations() {
 // ------------------------------------------------------------ discussion active
 async function openChat(id) {
   state.activeId = id;
+  // Historique : le bouton « retour » du téléphone ramène à la liste des discussions.
+  if (history.state && history.state.chat) history.replaceState({ chat: id }, '');
+  else history.pushState({ chat: id }, '');
   const conv = state.conversations.get(id);
   if (conv) conv.unread = 0;
   $('#chat-empty').hidden = true;
@@ -440,7 +443,18 @@ function closeChat() {
   renderConversations();
 }
 
-$('#back-btn').addEventListener('click', closeChat);
+$('#back-btn').addEventListener('click', () => {
+  if (history.state && history.state.chat) history.back();
+  else closeChat();
+});
+
+window.addEventListener('popstate', () => {
+  if (modal.open) modal.close();
+  if (state.activeId) closeChat();
+});
+
+// Dans l'application Android (APK), permettre de changer l'adresse du serveur.
+const IN_APP = /AgropamaApp/.test(navigator.userAgent);
 
 async function loadMessages(id, before) {
   const { messages, hasMore } = await api(`/api/conversations/${id}/messages${before ? `?before=${before}` : ''}`);
@@ -781,7 +795,11 @@ $('#me-btn').addEventListener('click', () => {
     h('hr'),
     h('label', {}, 'Mot de passe actuel', h('input', { name: 'currentPassword', type: 'password', autocomplete: 'current-password' })),
     h('label', {}, 'Nouveau mot de passe', h('input', { name: 'newPassword', type: 'password', minlength: 8, autocomplete: 'new-password' })),
-    h('div', { class: 'modal-actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Enregistrer'))
+    h('div', { class: 'modal-actions' },
+      IN_APP ? h('button', { class: 'btn', type: 'button', onclick: () => {
+        if (confirm("Changer l'adresse du serveur Agropama ?")) location.href = 'https://localhost/?change';
+      } }, 'Changer de serveur') : null,
+      h('button', { class: 'btn primary', type: 'submit' }, 'Enregistrer'))
   );
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

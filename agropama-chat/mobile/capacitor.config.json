@@ -1,0 +1,15 @@
+{
+  "appId": "com.agropama.messagerie",
+  "appName": "Agropama",
+  "webDir": "www",
+  "appendUserAgent": "AgropamaApp",
+  "backgroundColor": "#1f6f3f",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": ["*"],
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

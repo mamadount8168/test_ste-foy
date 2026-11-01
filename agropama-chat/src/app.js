@@ -183,6 +183,12 @@ function createApp(options = {}) {
   });
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
+  // Utilisé par l'application Android pour vérifier l'adresse du serveur.
+  app.get('/api/health', (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.json({ app: 'agropama-chat', ok: true });
+  });
+
   const wrap = (fn) => (req, res, next) => {
     try {
       fn(req, res, next);
