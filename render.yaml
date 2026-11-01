@@ -1,0 +1,25 @@
+# Déploiement gratuit d'Agropama Messagerie sur Render (https://render.com) pour les essais.
+services:
+  - type: web
+    name: agropama-messagerie
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: claude/agropama-messaging-app-xm6zez
+    rootDir: agropama-chat
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22.20.0"
+      - key: ADMIN_EMAIL
+        value: admin@agropama.com
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SECURE_COOKIES
+        value: "true"
+      - key: TRUST_PROXY
+        value: "true"

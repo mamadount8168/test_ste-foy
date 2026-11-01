@@ -6,6 +6,7 @@ const port = Number(process.env.PORT) || 3000;
 const { server } = createApp({
   dataDir: process.env.DATA_DIR,
   secureCookies: process.env.SECURE_COOKIES === 'true',
+  trustProxy: process.env.TRUST_PROXY === 'true',
 });
 
 server.listen(port, () => {

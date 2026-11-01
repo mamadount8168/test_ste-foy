@@ -173,6 +173,8 @@ function createApp(options = {}) {
   // ---------------------------------------------------------------- express
   const app = express();
   app.disable('x-powered-by');
+  // Derrière un hébergeur (Render, Railway, Nginx…) : utiliser la vraie adresse IP du client.
+  if (options.trustProxy) app.set('trust proxy', 1);
   app.use(express.json({ limit: '200kb' }));
   app.use(cookieParser());
   app.use((req, res, next) => {
