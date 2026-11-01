@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f6f3f">
+  <title>Agropama Messagerie</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ============ Authentification ============ -->
+  <section id="auth-view" class="auth" hidden>
+    <div class="auth-card">
+      <div class="brand">
+        <img src="logo.svg" alt="" width="56" height="56">
+        <div>
+          <h1>Agropama</h1>
+          <p>Messagerie interne</p>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="login" role="tab">Connexion</button>
+        <button class="tab" data-tab="register" role="tab">Inscription</button>
+      </div>
+
+      <div id="auth-notice" class="notice" hidden></div>
+
+      <form id="login-form" class="form">
+        <label>Courriel professionnel
+          <input name="email" type="email" autocomplete="username" required>
+        </label>
+        <label>Mot de passe
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="btn primary" type="submit">Se connecter</button>
+      </form>
+
+      <form id="register-form" class="form" hidden>
+        <label>Nom complet *
+          <input name="name" required minlength="2" maxlength="80" autocomplete="name">
+        </label>
+        <label>Courriel professionnel *
+          <input name="email" type="email" required autocomplete="email">
+        </label>
+        <div class="row">
+          <label>Téléphone
+            <input name="phone" type="tel" maxlength="30" autocomplete="tel">
+          </label>
+          <label>Service / département
+            <input name="department" maxlength="80" list="departments">
+          </label>
+        </div>
+        <label>Poste
+          <input name="jobTitle" maxlength="80">
+        </label>
+        <label>Mot de passe * <small>(8 caractères minimum)</small>
+          <input name="password" type="password" required minlength="8" autocomplete="new-password">
+        </label>
+        <label>Confirmer le mot de passe *
+          <input name="confirm" type="password" required minlength="8" autocomplete="new-password">
+        </label>
+        <button class="btn primary" type="submit">Envoyer ma demande</button>
+        <p class="hint">Votre compte sera actif dès qu'un administrateur l'aura validé.</p>
+      </form>
+      <datalist id="departments">
+        <option>Direction</option><option>Production</option><option>Logistique</option>
+        <option>Commercial</option><option>Comptabilité</option><option>Ressources humaines</option>
+        <option>Qualité</option><option>Maintenance</option>
+      </datalist>
+    </div>
+  </section>
+
+  <!-- ============ Application ============ -->
+  <section id="main-view" class="main" hidden>
+    <aside class="sidebar">
+      <header class="side-header">
+        <button id="me-btn" class="me" title="Mon profil">
+          <span id="me-avatar" class="avatar"></span>
+          <span class="me-info"><strong id="me-name"></strong><small id="me-role"></small></span>
+        </button>
+        <div class="actions">
+          <button id="admin-btn" class="icon-btn" title="Administration" hidden>
+            <svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm0 10.9h6c-.5 3.9-3 7.3-6 8.3v-8.3H6V6.3l6-2.2v8.8Z"/></svg>
+            <span id="pending-badge" class="badge" hidden></span>
+          </button>
+          <button id="new-group-btn" class="icon-btn" title="Nouveau groupe">
+            <svg viewBox="0 0 24 24"><path d="M16 11c1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3 1.3 3 3 3Zm-8 0c1.7 0 3-1.3 3-3S9.7 5 8 5 5 6.3 5 8s1.3 3 3 3Zm0 2c-2.3 0-7 1.2-7 3.5V19h14v-2.5C15 14.2 10.3 13 8 13Zm8 0h-1c1.2.9 2 2 2 3.5V19h6v-2.5c0-2.3-4.7-3.5-7-3.5Z"/></svg>
+          </button>
+          <button id="new-chat-btn" class="icon-btn" title="Nouvelle discussion">
+            <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Zm-3 9h-4v4h-2v-4H7V9h4V5h2v4h4v2Z"/></svg>
+          </button>
+          <button id="logout-btn" class="icon-btn" title="Se déconnecter">
+            <svg viewBox="0 0 24 24"><path d="M10 17v-3H3v-4h7V7l5 5-5 5Zm9-14H12v2h7v14h-7v2h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="search">
+        <input id="conv-search" type="search" placeholder="Rechercher une discussion">
+      </div>
+      <ul id="conv-list" class="conv-list"></ul>
+    </aside>
+
+    <main class="chat" id="chat">
+      <div id="chat-empty" class="chat-empty">
+        <img src="logo.svg" alt="" width="96" height="96">
+        <h2>Agropama Messagerie</h2>
+        <p>Sélectionnez une discussion ou démarrez-en une nouvelle avec un collègue.</p>
+      </div>
+
+      <div id="chat-panel" class="chat-panel" hidden>
+        <header class="chat-header">
+          <button id="back-btn" class="icon-btn back" title="Retour">
+            <svg viewBox="0 0 24 24"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2Z"/></svg>
+          </button>
+          <span id="chat-avatar" class="avatar"></span>
+          <button id="chat-info-btn" class="chat-title">
+            <strong id="chat-title"></strong>
+            <small id="chat-subtitle"></small>
+          </button>
+        </header>
+        <div id="messages" class="messages"></div>
+        <form id="composer" class="composer">
+          <label class="icon-btn attach" title="Joindre un fichier">
+            <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6h-1.5Z"/></svg>
+            <input id="file-input" type="file" hidden>
+          </label>
+          <textarea id="message-input" rows="1" placeholder="Écrire un message" maxlength="5000"></textarea>
+          <button class="icon-btn send" type="submit" title="Envoyer">
+            <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2v7Z"/></svg>
+          </button>
+        </form>
+      </div>
+    </main>
+  </section>
+
+  <!-- ============ Fenêtres modales ============ -->
+  <dialog id="modal" class="modal">
+    <div class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="icon-btn" id="modal-close" title="Fermer">
+        <svg viewBox="0 0 24 24"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4Z"/></svg>
+      </button>
+    </div>
+    <div id="modal-body" class="modal-body"></div>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
