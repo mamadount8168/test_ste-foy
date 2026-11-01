@@ -6,10 +6,13 @@
   "backgroundColor": "#1f6f3f",
   "server": {
     "androidScheme": "https",
-    "allowNavigation": ["*"],
-    "cleartext": true
+    "allowNavigation": [
+      "*"
+    ],
+    "cleartext": false
   },
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
   }
 }

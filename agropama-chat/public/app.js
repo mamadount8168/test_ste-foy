@@ -164,6 +164,74 @@ function fixDuration(media) {
   return media;
 }
 
+/** Résumé d'un message déchiffré (aperçus, notifications). */
+function summaryOf(payload) {
+  if (!payload) return '';
+  if (payload.t === 'text') return payload.text;
+  return payload.caption ? `${fileLabel(payload)} ${payload.caption}` : fileLabel(payload);
+}
+
+async function plainSummary(msg) {
+  if (!msg.envelope) return msg.body || '';
+  const d = await Secure.decrypt(msg);
+  return d.error ? '🔒 Nouveau message' : summaryOf(d.payload);
+}
+
+// Types qu'on accepte d'afficher (tout le reste est proposé au téléchargement).
+function safeType(type) {
+  const t = String(type || '').toLowerCase().split(';')[0];
+  return /^(image\/(png|jpe?g|gif|webp)|video\/(mp4|webm|3gpp|quicktime)|audio\/(webm|ogg|mpeg|mp4|aac|wav|x-m4a|3gpp))$/.test(t) ? t : 'application/octet-stream';
+}
+
+// Fichiers : téléchargés chiffrés puis déchiffrés sur l'appareil.
+const blobUrls = new Map(); // messageId -> Promise<url>
+function decryptedBlobUrl(m, p) {
+  if (!blobUrls.has(m.id)) {
+    blobUrls.set(m.id, (async () => {
+      const res = await fetch(m.file.url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Fichier introuvable');
+      const plain = await E2E.decryptFile(await res.arrayBuffer(), p.key, p.iv);
+      return URL.createObjectURL(new Blob([plain], { type: safeType(p.type) }));
+    })().catch((err) => { blobUrls.delete(m.id); throw err; }));
+  }
+  return blobUrls.get(m.id);
+}
+
+// Les éléments média sont conservés entre deux affichages (la lecture n'est pas interrompue).
+const mediaEls = new Map();
+function mediaFor(m, p) {
+  if (mediaEls.has(m.id)) return mediaEls.get(m.id);
+  const kind = fileKind({ type: safeType(p.type) });
+  const box = h('div', { class: 'media-box' });
+  if (kind === 'file') {
+    const card = h('a', { class: 'file-card', href: '#' }, svg(ICON_FILE), h('span', {}, p.name || 'Document', h('small', {}, `${fmtSize(p.size || 0)} · 🔒 chiffré`)));
+    card.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        const url = await decryptedBlobUrl(m, p);
+        const a = h('a', { href: url, download: p.name || 'document' });
+        document.body.append(a);
+        a.click();
+        a.remove();
+      } catch {
+        toast('Impossible de déchiffrer ce fichier.', true);
+      }
+    });
+    box.append(card);
+  } else {
+    box.append(h('div', { class: 'media-loading' }, '🔒 Déchiffrement…'));
+    decryptedBlobUrl(m, p).then((url) => {
+      let el;
+      if (kind === 'image') el = h('img', { class: 'thumb', src: url, alt: p.name || 'Photo', onclick: () => window.open(url, '_blank') });
+      else if (kind === 'video') el = h('video', { class: 'thumb', src: url, controls: true, preload: 'metadata', playsinline: true });
+      else el = h('div', { class: 'voice' }, avatar(m.senderName || '?'), fixDuration(h('audio', { src: url, controls: true, preload: 'metadata' })));
+      box.replaceChildren(el);
+    }).catch(() => box.replaceChildren(h('span', { class: 'body' }, '🔒 Impossible de déchiffrer ce fichier')));
+  }
+  mediaEls.set(m.id, box);
+  return box;
+}
+
 function fileLabel(file) {
   return { image: '📷 Photo', video: '🎥 Vidéo', audio: '🎤 Message vocal', file: `📎 ${file.name}` }[fileKind(file)];
 }
@@ -193,18 +261,31 @@ function switchTab(tab) {
 
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
+function busy(form, flag) {
+  form.querySelectorAll('button, input').forEach((el) => { el.disabled = flag; });
+}
+
 $('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const f = new FormData(e.target);
+  const form = e.target;
+  const f = new FormData(form);
+  const email = String(f.get('email')).trim();
+  const password = String(f.get('password'));
+  busy(form, true);
+  setNotice('Connexion sécurisée…', 'ok');
   try {
-    const { user } = await api('/api/auth/login', {
-      method: 'POST',
-      body: { email: f.get('email'), password: f.get('password') },
-    });
-    e.target.reset();
-    await start(user);
+    // Le mot de passe ne quitte jamais l'appareil : seule une empreinte dérivée est envoyée.
+    const { user } = await api('/api/auth/login', { method: 'POST', body: { email, password: await E2E.authSecret(email, password) } });
+    setNotice('Déverrouillage du chiffrement…', 'ok');
+    await Secure.unlock(user, password);
+    form.reset();
+    setNotice('');
+    await start((await api('/api/me')).user);
   } catch (err) {
+    if (err.message === 'Connexion annulée.') await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
     setNotice(err.message, err.data && err.data.status === 'pending' ? 'warn' : '');
+  } finally {
+    busy(form, false);
   }
 });
 
@@ -212,8 +293,12 @@ $('#register-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(e.target));
   if (f.password !== f.confirm) return setNotice('Les mots de passe ne correspondent pas.');
+  const problem = E2E.passwordProblem(f.password, f.email);
+  if (problem) return setNotice(problem);
   try {
-    const { message } = await api('/api/auth/register', { method: 'POST', body: f });
+    const body = { ...f, email: f.email.trim(), password: await E2E.authSecret(f.email, f.password) };
+    delete body.confirm;
+    const { message } = await api('/api/auth/register', { method: 'POST', body });
     e.target.reset();
     switchTab('login');
     setNotice(message, 'ok');
@@ -223,6 +308,8 @@ $('#register-form').addEventListener('submit', async (e) => {
 });
 
 $('#logout-btn').addEventListener('click', async () => {
+  if (!confirm('Se déconnecter ? Vos clés de chiffrement seront retirées de cet appareil (elles restent récupérables avec votre mot de passe).')) return;
+  await Secure.forget();
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   location.reload();
 });
@@ -249,6 +336,7 @@ function renderMe() {
 async function loadUsers() {
   const { users } = await api('/api/users');
   state.users = new Map(users.map((u) => [u.id, u]));
+  users.forEach((u) => Secure.observe(u));
 }
 
 async function loadConversations() {
@@ -256,6 +344,18 @@ async function loadConversations() {
   state.conversations = new Map(conversations.map((c) => [c.id, c]));
   renderConversations();
 }
+
+// Rafraîchissement groupé de l'affichage (après déchiffrement des messages).
+let renderQueued = 0;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = requestAnimationFrame(() => {
+    renderQueued = 0;
+    renderConversations();
+    if (state.activeId) renderMessages(false);
+  });
+}
+Secure.onUpdate = scheduleRender;
 
 // ------------------------------------------------------------ temps réel
 function connectSocket() {
@@ -347,10 +447,34 @@ function connectSocket() {
 
   socket.on('session:revoked', ({ reason }) => {
     socket.disconnect();
+    Secure.forget();
     showAuth(reason, 'warn');
   });
 
   socket.on('session:refresh', () => location.reload());
+
+  socket.on('user:keys', async ({ userId, keyId, publicKeys }) => {
+    Secure.invalidate(userId);
+    if (userId === state.me.id) {
+      if (keyId !== Secure.keyId) {
+        await Secure.forget();
+        socket.disconnect();
+        await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+        showAuth('Vos clés de chiffrement ont changé sur un autre appareil. Reconnectez-vous.', 'warn');
+      }
+      return;
+    }
+    const patch = (u) => { if (u && u.id === userId) Object.assign(u, { keyId, publicKeys }); };
+    patch(state.users.get(userId));
+    for (const c of state.conversations.values()) {
+      c.members.forEach(patch);
+      patch(c.peer);
+    }
+    const u = state.users.get(userId);
+    if (u && (await Secure.observe(u))) {
+      toast(`🔐 Le code de sécurité de ${u.name} a changé (nouvelles clés). Vérifiez-le avec cette personne.`);
+    }
+  });
 
   setupCallSocket(socket);
 
@@ -383,10 +507,10 @@ function typingText(conversationId) {
   return names.length === 1 ? `${names[0]} écrit…` : `${names.join(', ')} écrivent…`;
 }
 
-function notify(msg) {
+async function notify(msg) {
   const conv = state.conversations.get(msg.conversationId);
   const title = conv ? conv.title : 'Nouveau message';
-  const text = msg.body || (msg.file ? fileLabel(msg.file) : '');
+  const text = await plainSummary(msg);
   if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
     const n = new Notification(title, { body: `${msg.senderName}: ${text}`, icon: 'logo.svg', tag: `conv-${msg.conversationId}` });
     n.onclick = () => {
@@ -404,7 +528,13 @@ function previewText(conv) {
   if (t) return h('span', { class: 'typing' }, t);
   const m = conv.lastMessage;
   if (!m) return h('span', {}, conv.type === 'group' ? `${conv.members.length} membres` : 'Nouvelle discussion');
-  let text = m.deleted ? '🚫 Message supprimé' : m.body || (m.file ? fileLabel(m.file) : '');
+  let text;
+  if (m.deleted) text = '🚫 Message supprimé';
+  else if (!m.envelope) text = m.body || '';
+  else {
+    const d = Secure.peek(m);
+    text = d === undefined ? '🔒 Message chiffré' : d.error ? '🔒 Message illisible' : summaryOf(d.payload);
+  }
   if (m.senderId === state.me.id) text = `Vous : ${text}`;
   else if (conv.type === 'group' && m.senderName) text = `${m.senderName.split(' ')[0]} : ${text}`;
   return h('span', {}, text);
@@ -528,7 +658,8 @@ function renderMessages(scrollToBottom) {
   const prevTop = box.scrollTop;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
 
-  box.replaceChildren();
+  box.replaceChildren(h('div', { class: 'e2e-banner' },
+    '🔒 Les messages et les appels sont chiffrés de bout en bout. Personne en dehors de cette discussion, ni Agropama ni l’hébergeur, ne peut les lire ou les écouter.'));
   if (state.hasMore.get(id)) {
     box.append(h('button', { class: 'btn small load-more', onclick: () => loadMessages(id, list[0] && list[0].id) }, 'Messages précédents'));
   }
@@ -552,27 +683,24 @@ function renderMessages(scrollToBottom) {
 
     const content = [];
     if (conv && conv.type === 'group' && !mine && first) content.push(h('span', { class: 'sender' }, m.senderName || 'Ancien employé'));
+    let failed = false;
     if (m.deleted) {
       content.push(h('span', { class: 'body' }, '🚫 Ce message a été supprimé'));
-    } else {
-      if (m.file) {
-        const kind = fileKind(m.file);
-        if (kind === 'image') {
-          content.push(h('img', { class: 'thumb', src: m.file.url, alt: m.file.name, loading: 'lazy', onclick: () => window.open(m.file.url, '_blank') }));
-        } else if (kind === 'video') {
-          content.push(h('video', { class: 'thumb', src: m.file.url, controls: true, preload: 'metadata', playsinline: true }));
-        } else if (kind === 'audio') {
-          content.push(h('div', { class: 'voice' },
-            avatar(m.senderName || '?'),
-            fixDuration(h('audio', { src: m.file.url, controls: true, preload: 'metadata' }))));
-        } else {
-          content.push(
-            h('a', { class: 'file-card', href: `${m.file.url}?download`, download: m.file.name },
-              svg(ICON_FILE), h('span', {}, m.file.name, h('small', {}, fmtSize(m.file.size))))
-          );
-        }
-      }
+    } else if (!m.envelope) {
       if (m.body) content.push(h('span', { class: 'body' }, linkify(m.body)));
+    } else {
+      const d = Secure.peek(m);
+      if (d === undefined) {
+        content.push(h('span', { class: 'body pending' }, '🔒 Déchiffrement…'));
+      } else if (d.error) {
+        failed = true;
+        content.push(h('span', { class: 'body' }, d.error));
+      } else if (d.payload.t === 'text') {
+        content.push(h('span', { class: 'body' }, linkify(String(d.payload.text))));
+      } else if (d.payload.t === 'file' && m.file) {
+        content.push(mediaFor(m, d.payload));
+        if (d.payload.caption) content.push(h('span', { class: 'body' }, linkify(String(d.payload.caption))));
+      }
     }
     const meta = h('span', { class: 'meta' }, fmtTime(m.createdAt));
     if (mine && !m.deleted && conv) {
@@ -584,7 +712,7 @@ function renderMessages(scrollToBottom) {
     if (canDelete) {
       content.push(h('button', { class: 'msg-menu', title: 'Supprimer', onclick: () => deleteMessage(m) }, '✕'));
     }
-    box.append(h('div', { class: `msg${mine ? ' out' : ''}${first ? ' first' : ''}${m.deleted ? ' deleted' : ''}` }, content));
+    box.append(h('div', { class: `msg${mine ? ' out' : ''}${first ? ' first' : ''}${m.deleted || failed ? ' deleted' : ''}` }, content));
   }
 
   if (scrollToBottom || nearBottom) box.scrollTop = box.scrollHeight;
@@ -640,7 +768,9 @@ $('#composer').addEventListener('submit', async (e) => {
   updateComposerButtons();
   sendTyping(false);
   try {
-    const { message } = await api(`/api/conversations/${state.activeId}/messages`, { method: 'POST', body: { body } });
+    const conv = state.conversations.get(state.activeId);
+    const envelope = await Secure.encryptFor(conv, { t: 'text', text: body });
+    const { message } = await api(`/api/conversations/${conv.id}/messages`, { method: 'POST', body: { envelope } });
     const list = state.messages.get(message.conversationId);
     if (list && !list.some((m) => m.id === message.id)) {
       list.push(message);
@@ -656,15 +786,24 @@ $('#composer').addEventListener('submit', async (e) => {
 const MAX_UPLOAD = 50 * 1024 * 1024;
 
 async function uploadFile(file, { caption = '', label } = {}) {
-  const conversationId = state.activeId;
-  if (!file || !conversationId) return;
+  const conv = state.conversations.get(state.activeId);
+  if (!file || !conv) return;
   if (file.size > MAX_UPLOAD) return toast('Fichier trop volumineux (50 Mo max).', true);
-  const fd = new FormData();
-  fd.append('file', file, file.name || 'fichier');
-  if (caption) fd.append('body', caption);
-  toast(`Envoi ${label || `de « ${file.name} »`}…`);
+  toast(`Chiffrement et envoi ${label || `de « ${file.name} »`}…`);
   try {
-    await api(`/api/conversations/${conversationId}/files`, { method: 'POST', body: fd });
+    // Le fichier est chiffré sur l'appareil : le serveur ne stocke que des octets illisibles.
+    const type = String(file.type || 'application/octet-stream').split(';')[0];
+    const f = await E2E.encryptFile(await file.arrayBuffer());
+    const payload = { t: 'file', kind: fileKind({ type }), name: String(file.name || 'fichier').slice(0, 200), type, size: file.size, key: f.key, iv: f.iv };
+    if (caption) payload.caption = caption.slice(0, 5000);
+    const envelope = await Secure.encryptFor(conv, payload);
+    const fd = new FormData();
+    fd.append('envelope', JSON.stringify(envelope));
+    fd.append('file', new Blob([f.data], { type: 'application/octet-stream' }), 'fichier-chiffre.bin');
+    const { message } = await api(`/api/conversations/${conv.id}/files`, { method: 'POST', body: fd });
+    Secure.remember(message.id, payload);
+    blobUrls.set(message.id, Promise.resolve(URL.createObjectURL(new Blob([file], { type: safeType(type) }))));
+    scheduleRender();
     $('#toast').hidden = true;
     return true;
   } catch (err) {
@@ -776,7 +915,7 @@ modal.addEventListener('close', () => {
 
 function openModal(title, ...content) {
   $('#modal-title').textContent = title;
-  $('#modal-body').replaceChildren(...content);
+  $('#modal-body').replaceChildren(...content.filter((c) => c != null && c !== false));
   if (!modal.open) modal.showModal();
 }
 
@@ -862,11 +1001,28 @@ $('#chat-info-btn').addEventListener('click', () => {
       p.phone ? h('p', {}, h('strong', {}, 'Téléphone : '), h('a', { href: `tel:${p.phone}` }, p.phone)) : null,
       p.jobTitle ? h('p', {}, h('strong', {}, 'Poste : '), p.jobTitle) : null,
       p.department ? h('p', {}, h('strong', {}, 'Service : '), p.department) : null,
+      securityBox(p),
     );
     return;
   }
   showGroupInfo(conv);
 });
+
+/** Code de sécurité : à comparer de vive voix pour être sûr que personne n'intercepte la discussion. */
+function securityBox(peer) {
+  const box = h('div', { class: 'security-box' },
+    h('strong', {}, '🔐 Chiffrement de bout en bout'),
+    h('p', {}, 'Comparez ce code avec celui affiché sur le téléphone de ' + peer.name +
+      ". S'ils sont identiques, personne ne peut lire ni écouter vos échanges."));
+  if (!peer.publicKeys) {
+    box.append(h('p', { class: 'warn' }, `${peer.name} ne s'est pas encore connecté à la version chiffrée.`));
+    return box;
+  }
+  const grid = h('div', { class: 'safety-number' }, '…');
+  box.append(grid);
+  Secure.safetyNumberWith(peer).then((groups) => grid.replaceChildren(...groups.map((g) => h('span', {}, g))));
+  return box;
+}
 
 function showGroupInfo(conv) {
   const canManage = conv.isGroupAdmin || state.me.role === 'admin';
@@ -883,7 +1039,12 @@ function showGroupInfo(conv) {
         } catch (err) { toast(err.message, true); }
       } }, 'Retirer'));
     }
-    ul.append(h('li', {}, userRow({ ...m, name: m.id === state.me.id ? `${m.name} (vous)` : m.name }, h('div', { class: 'btns' }, btns))));
+    const row = h('li', {}, userRow({ ...m, name: m.id === state.me.id ? `${m.name} (vous)` : m.name }, h('div', { class: 'btns' }, btns)));
+    Secure.shortCode(m).then((code) => {
+      const info = row.querySelector('.info');
+      if (info) info.append(h('small', { class: 'code' }, code ? `🔐 ${code}` : '⚠️ chiffrement non activé'));
+    });
+    ul.append(row);
   }
   const actions = h('div', { class: 'modal-actions' });
   if (canManage) {
@@ -896,7 +1057,9 @@ function showGroupInfo(conv) {
       modal.close();
     } catch (err) { toast(err.message, true); }
   } }, 'Quitter le groupe'));
-  openModal(conv.title, h('p', {}, `${conv.members.length} membres`), ul, actions);
+  openModal(conv.title,
+    h('p', {}, `${conv.members.length} membres · 🔒 messages chiffrés de bout en bout`),
+    ul, actions);
 }
 
 async function addMembers(conv) {
@@ -929,7 +1092,8 @@ $('#me-btn').addEventListener('click', () => {
     h('label', {}, 'Poste', h('input', { name: 'jobTitle', value: me.jobTitle || '' })),
     h('hr'),
     h('label', {}, 'Mot de passe actuel', h('input', { name: 'currentPassword', type: 'password', autocomplete: 'current-password' })),
-    h('label', {}, 'Nouveau mot de passe', h('input', { name: 'newPassword', type: 'password', minlength: 8, autocomplete: 'new-password' })),
+    h('label', {}, 'Nouveau mot de passe (10 caractères min., lettres et chiffres)', h('input', { name: 'newPassword', type: 'password', minlength: 10, autocomplete: 'new-password' })),
+    h('p', { class: 'hint' }, 'Changer le mot de passe déconnecte vos autres appareils.'),
     h('div', { class: 'modal-actions' },
       IN_APP ? h('button', { class: 'btn', type: 'button', onclick: () => {
         if (confirm("Changer l'adresse du serveur Agropama ?")) location.href = 'https://localhost/?change';
@@ -941,6 +1105,18 @@ $('#me-btn').addEventListener('click', () => {
     const data = Object.fromEntries(new FormData(form));
     if (!data.newPassword) { delete data.newPassword; delete data.currentPassword; }
     try {
+      if (data.newPassword) {
+        const problem = E2E.passwordProblem(data.newPassword, me.email);
+        if (problem) return toast(problem, true);
+        const current = data.currentPassword;
+        try {
+          data.wrapped = await Secure.rewrap(current, data.newPassword);
+        } catch {
+          return toast('Mot de passe actuel incorrect.', true);
+        }
+        data.currentPassword = await E2E.authSecret(me.email, current);
+        data.newPassword = await E2E.authSecret(me.email, data.newPassword);
+      }
       const { user } = await api('/api/me', { method: 'PATCH', body: data });
       state.me = user;
       renderMe();
@@ -1203,6 +1379,8 @@ async function startCall(video) {
   if (!conv || conv.type !== 'direct' || !state.socket) return;
   if (call.id || call.role) return toast('Un appel est déjà en cours.', true);
   if (!window.RTCPeerConnection || !navigator.mediaDevices) return toast("Les appels ne sont pas pris en charge sur cet appareil.", true);
+  if (!conv.peer.publicKeys) return toast(`${conv.peer.name} doit d'abord se connecter à la version chiffrée de l'application.`, true);
+  await Secure.observe(conv.peer);
   Object.assign(call, { role: 'caller', video, peer: conv.peer, conversationId: conv.id, facing: 'user' });
   showCallScreen('outgoing');
   setCallStatus('Préparation…');
@@ -1276,15 +1454,31 @@ function cleanupCall(message) {
   }
 }
 
+/**
+ * Les appels WebRTC sont chiffrés (DTLS-SRTP). Pour empêcher un serveur piraté de s'interposer,
+ * la description de session (qui contient l'empreinte de la clé DTLS) est signée par l'appelant
+ * et vérifiée avec sa clé épinglée.
+ */
+async function signedSdp(desc) {
+  const plain = { type: desc.type, sdp: desc.sdp };
+  return { sdp: plain, ...(await Secure.signText(`agropama-call-v1|${call.id}|${plain.type}|${plain.sdp}`)) };
+}
+
 async function handleSignal(data) {
   const pc = call.pc;
   if (!pc || !data) return;
   try {
     if (data.sdp) {
+      const peerId = call.peer && call.peer.id;
+      const text = `agropama-call-v1|${call.id}|${data.sdp.type}|${data.sdp.sdp}`;
+      if (!peerId || !(await Secure.verifyFrom(peerId, text, data.sig, data.kid))) {
+        toast("⚠️ Appel bloqué : l'identité du correspondant n'a pas pu être vérifiée.", true);
+        return hangUp();
+      }
       await pc.setRemoteDescription(data.sdp);
       if (data.sdp.type === 'offer') {
         await pc.setLocalDescription(await pc.createAnswer());
-        state.socket.emit('call:signal', { callId: call.id, data: { sdp: pc.localDescription } });
+        state.socket.emit('call:signal', { callId: call.id, data: await signedSdp(pc.localDescription) });
       }
       for (const c of call.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
     } else if (data.candidate) {
@@ -1303,6 +1497,7 @@ function setupCallSocket(socket) {
       id: data.callId, role: 'callee', video: data.video, conversationId: data.conversationId,
       peer: state.users.get(data.from.id) || data.from, facing: 'user',
     });
+    Secure.observe(call.peer);
     showCallScreen('incoming');
     setCallStatus(data.video ? 'Appel vidéo entrant…' : 'Appel vocal entrant…');
     call.stopTone = playTone('incoming');
@@ -1318,7 +1513,7 @@ function setupCallSocket(socket) {
     call.accepted = true;
     const pc = await createPeer();
     await pc.setLocalDescription(await pc.createOffer());
-    socket.emit('call:signal', { callId, data: { sdp: pc.localDescription } });
+    socket.emit('call:signal', { callId, data: await signedSdp(pc.localDescription) });
   });
 
   socket.on('call:signal', ({ callId, data }) => {
@@ -1394,10 +1589,16 @@ document.addEventListener('visibilitychange', () => {
 });
 
 (async function boot() {
+  let user;
   try {
-    const { user } = await api('/api/me');
-    await start(user);
+    ({ user } = await api('/api/me'));
   } catch {
-    showAuth();
+    return showAuth();
   }
+  if (!(await Secure.load(user))) {
+    // Clés absentes de cet appareil : il faut le mot de passe pour les déverrouiller.
+    await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    return showAuth('Pour protéger vos messages chiffrés, reconnectez-vous sur cet appareil.', 'warn');
+  }
+  await start(user);
 })();

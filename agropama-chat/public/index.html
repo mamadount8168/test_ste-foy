@@ -55,14 +55,16 @@
         <label>Poste
           <input name="jobTitle" maxlength="80">
         </label>
-        <label>Mot de passe * <small>(8 caractères minimum)</small>
-          <input name="password" type="password" required minlength="8" autocomplete="new-password">
+        <label>Mot de passe * <small>(10 caractères minimum, lettres et chiffres)</small>
+          <input name="password" type="password" required minlength="10" autocomplete="new-password">
         </label>
         <label>Confirmer le mot de passe *
-          <input name="confirm" type="password" required minlength="8" autocomplete="new-password">
+          <input name="confirm" type="password" required minlength="10" autocomplete="new-password">
         </label>
         <button class="btn primary" type="submit">Envoyer ma demande</button>
         <p class="hint">Votre compte sera actif dès qu'un administrateur l'aura validé.</p>
+        <p class="hint">🔒 Vos messages sont chiffrés de bout en bout. Retenez bien votre mot de passe :
+          il protège aussi vos clés de chiffrement.</p>
       </form>
       <datalist id="departments">
         <option>Direction</option><option>Production</option><option>Logistique</option>
@@ -206,6 +208,8 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="e2e.js"></script>
+  <script src="secure.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

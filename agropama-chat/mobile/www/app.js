@@ -19,6 +19,7 @@
     if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
     try {
       const u = new URL(v);
+      if (u.protocol !== 'https:') return null; // connexions chiffrées (HTTPS) uniquement
       return u.origin;
     } catch {
       return null;
@@ -73,7 +74,7 @@
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const origin = normalize(input.value);
-    if (!origin) return showForm('Adresse invalide.', input.value);
+    if (!origin) return showForm('Adresse invalide : seules les adresses sécurisées « https:// » sont acceptées.', input.value);
     button.disabled = true;
     connect(origin, true);
   });

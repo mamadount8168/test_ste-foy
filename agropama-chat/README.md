@@ -5,6 +5,9 @@ Les employés s'inscrivent eux-mêmes, mais un **administrateur doit valider cha
 
 ## Fonctionnalités
 
+> 🔒 **Messages, fichiers, messages vocaux et appels chiffrés de bout en bout.**
+> Voir [SECURITE.md](SECURITE.md) pour l'audit de sécurité et le fonctionnement du chiffrement.
+
 **Employés**
 - Inscription (nom, courriel, téléphone, service, poste, mot de passe) → compte « en attente »
 - Connexion uniquement une fois le compte validé
@@ -53,7 +56,6 @@ Si `ADMIN_PASSWORD` n'est pas fourni, un mot de passe aléatoire est généré e
 | `ADMIN_EMAIL`     | Courriel du premier administrateur                          | `admin@agropama.com`      |
 | `ADMIN_PASSWORD`  | Mot de passe du premier administrateur                      | généré aléatoirement      |
 | `ADMIN_NAME`      | Nom affiché du premier administrateur                       | `Administrateur Agropama` |
-| `JWT_SECRET`      | Clé de signature des sessions                               | générée dans `DATA_DIR`   |
 | `TURN_URLS`       | Serveur(s) TURN pour les appels, séparés par des virgules   | aucun (STUN Google seul)  |
 | `TURN_USERNAME` / `TURN_CREDENTIAL` | Identifiants du serveur TURN      | —                         |
 | `SECURE_COOKIES`  | `true` si l'application est servie en HTTPS (recommandé)    | `false`                   |
@@ -70,7 +72,8 @@ Si `ADMIN_PASSWORD` n'est pas fourni, un mot de passe aléatoire est généré e
 ## Tests
 
 ```bash
-npm test
+npm test                                   # tests automatiques (chiffrement, sessions, appels…)
+node pentest/attaque.js <url> <admin> <mdp> # tests d'intrusion (26 attaques)
 ```
 
 Le test d'intégration couvre : inscription → connexion refusée tant que le compte est en attente →
@@ -105,12 +108,20 @@ Le fichier **`Agropama.apk`** (à la racine de ce dossier) s'installe directemen
 
 **Reconstruire l'APK** (Node.js, Java 21 et le SDK Android requis)
 
+L'APK de production est signée avec la clé d'Agropama (`agropama-release.jks`), qui n'est **jamais**
+enregistrée dans le dépôt. Créer `mobile/android/keystore.properties` :
+
+```properties
+storeFile=/chemin/vers/agropama-release.jks
+storePassword=…
+keyAlias=agropama
+keyPassword=…
+```
+
 ```bash
 cd agropama-chat/mobile
 npm install
-ANDROID_HOME=/chemin/vers/android-sdk npm run apk
-# → android/app/build/outputs/apk/debug/app-debug.apk
+npx cap sync android
+cd android && ANDROID_HOME=/chemin/vers/android-sdk ./gradlew assembleRelease
+# → app/build/outputs/apk/release/app-release.apk
 ```
-
-L'APK fourni est signé avec une clé de développement : il s'installe sans problème en dehors du Play Store.
-Pour une publication sur le Google Play Store, il faudra générer une version signée avec une clé propre à Agropama.

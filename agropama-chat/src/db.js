@@ -61,8 +61,39 @@ function openDatabase(file) {
 
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id);
     CREATE INDEX IF NOT EXISTS idx_members_user ON conversation_members(user_id);
+
+    -- Sessions révocables : le cookie contient un jeton aléatoire, seule son empreinte SHA-256 est stockée.
+    CREATE TABLE IF NOT EXISTS sessions (
+      id_hash     TEXT PRIMARY KEY,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      expires_at  INTEGER NOT NULL,
+      last_seen   INTEGER NOT NULL,
+      user_agent  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+    -- Clés publiques de chiffrement de bout en bout (historique conservé pour relire les anciens messages).
+    CREATE TABLE IF NOT EXISTS user_keys (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      enc_pub     TEXT NOT NULL,
+      sign_pub    TEXT NOT NULL,
+      wrapped     TEXT,
+      active      INTEGER NOT NULL DEFAULT 1,
+      created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_keys_user ON user_keys(user_id, active);
   `);
+  addColumn(db, 'users', 'failed_logins', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn(db, 'users', 'locked_until', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn(db, 'messages', 'ciphertext', 'TEXT');
   return db;
+}
+
+function addColumn(db, table, column, type) {
+  const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 function transaction(db, fn) {
