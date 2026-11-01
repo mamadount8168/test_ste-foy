@@ -119,18 +119,42 @@
             <strong id="chat-title"></strong>
             <small id="chat-subtitle"></small>
           </button>
+          <button id="video-call-btn" class="icon-btn" title="Appel vidéo" hidden>
+            <svg viewBox="0 0 24 24"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z"/></svg>
+          </button>
+          <button id="voice-call-btn" class="icon-btn" title="Appel vocal" hidden>
+            <svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1L6.6 10.8Z"/></svg>
+          </button>
         </header>
         <div id="messages" class="messages"></div>
         <form id="composer" class="composer">
-          <label class="icon-btn attach" title="Joindre un fichier">
+          <label class="icon-btn attach" title="Joindre un document">
             <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6h-1.5Z"/></svg>
             <input id="file-input" type="file" hidden>
           </label>
+          <label class="icon-btn attach" title="Photo ou vidéo">
+            <svg viewBox="0 0 24 24"><path d="M9 3 7.2 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9Zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg>
+            <input id="media-input" type="file" accept="image/*,video/*" hidden>
+          </label>
           <textarea id="message-input" rows="1" placeholder="Écrire un message" maxlength="5000"></textarea>
-          <button class="icon-btn send" type="submit" title="Envoyer">
+          <button id="mic-btn" class="icon-btn send" type="button" title="Message vocal">
+            <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+          </button>
+          <button id="send-btn" class="icon-btn send" type="submit" title="Envoyer" hidden>
             <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2v7Z"/></svg>
           </button>
         </form>
+        <div id="recorder" class="composer recorder" hidden>
+          <button id="rec-cancel" class="icon-btn" type="button" title="Annuler">
+            <svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12ZM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4Z"/></svg>
+          </button>
+          <span class="rec-dot"></span>
+          <span id="rec-time" class="rec-time">0:00</span>
+          <span class="rec-label">Enregistrement…</span>
+          <button id="rec-send" class="icon-btn send" type="button" title="Envoyer le message vocal">
+            <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2v7Z"/></svg>
+          </button>
+        </div>
       </div>
     </main>
   </section>
@@ -145,6 +169,39 @@
     </div>
     <div id="modal-body" class="modal-body"></div>
   </dialog>
+
+  <!-- ============ Appels ============ -->
+  <section id="call-screen" class="call-screen" hidden>
+    <video id="remote-video" class="remote-video" autoplay playsinline></video>
+    <video id="local-video" class="local-video" autoplay playsinline muted></video>
+    <div class="call-info">
+      <span id="call-avatar" class="avatar big"></span>
+      <h2 id="call-name"></h2>
+      <p id="call-status"></p>
+    </div>
+    <div id="incoming-actions" class="call-actions" hidden>
+      <button id="call-decline" class="call-btn hangup" title="Refuser">
+        <svg viewBox="0 0 24 24"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1a1 1 0 0 1-.56.9 11.5 11.5 0 0 0-2.66 1.85 1 1 0 0 1-1.41 0L.29 13.08a1 1 0 0 1 0-1.41C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67a1 1 0 0 1 0 1.41l-2.48 2.49a1 1 0 0 1-1.41 0 11.3 11.3 0 0 0-2.67-1.85 1 1 0 0 1-.56-.9v-3.1A15 15 0 0 0 12 9Z"/></svg>
+      </button>
+      <button id="call-accept" class="call-btn accept" title="Répondre">
+        <svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1L6.6 10.8Z"/></svg>
+      </button>
+    </div>
+    <div id="active-actions" class="call-actions" hidden>
+      <button id="call-mute" class="call-btn" title="Couper le micro">
+        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+      </button>
+      <button id="call-camera" class="call-btn" title="Couper la caméra">
+        <svg viewBox="0 0 24 24"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z"/></svg>
+      </button>
+      <button id="call-flip" class="call-btn" title="Changer de caméra">
+        <svg viewBox="0 0 24 24"><path d="M20 5h-3.2L15 3H9L7.2 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm-5 11.5V14H9v2.5L5.5 13 9 9.5V12h6V9.5l3.5 3.5-3.5 3.5Z"/></svg>
+      </button>
+      <button id="call-hangup" class="call-btn hangup" title="Raccrocher">
+        <svg viewBox="0 0 24 24"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1a1 1 0 0 1-.56.9 11.5 11.5 0 0 0-2.66 1.85 1 1 0 0 1-1.41 0L.29 13.08a1 1 0 0 1 0-1.41C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67a1 1 0 0 1 0 1.41l-2.48 2.49a1 1 0 0 1-1.41 0 11.3 11.3 0 0 0-2.67-1.85 1 1 0 0 1-.56-.9v-3.1A15 15 0 0 0 12 9Z"/></svg>
+      </button>
+    </div>
+  </section>
 
   <div id="toast" class="toast" hidden></div>
 

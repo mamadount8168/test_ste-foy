@@ -142,6 +142,32 @@ function linkify(text) {
   return frag;
 }
 
+function fileKind(file) {
+  const t = (file.type || '').toLowerCase();
+  if (/^image\/(png|jpe?g|gif|webp)$/.test(t)) return 'image';
+  if (/^video\//.test(t)) return 'video';
+  if (/^audio\//.test(t)) return 'audio';
+  return 'file';
+}
+
+// Les enregistrements WebM de Chrome n'indiquent pas leur durée : on la calcule à la lecture des métadonnées.
+function fixDuration(media) {
+  media.addEventListener('loadedmetadata', () => {
+    if (media.duration !== Infinity) return;
+    const reset = () => {
+      media.removeEventListener('timeupdate', reset);
+      media.currentTime = 0;
+    };
+    media.addEventListener('timeupdate', reset);
+    media.currentTime = 1e101;
+  }, { once: true });
+  return media;
+}
+
+function fileLabel(file) {
+  return { image: '📷 Photo', video: '🎥 Vidéo', audio: '🎤 Message vocal', file: `📎 ${file.name}` }[fileKind(file)];
+}
+
 const STATUS_LABEL = { pending: 'En attente', approved: 'Validé', rejected: 'Refusé', suspended: 'Suspendu' };
 
 // ------------------------------------------------------------ authentification
@@ -326,6 +352,8 @@ function connectSocket() {
 
   socket.on('session:refresh', () => location.reload());
 
+  setupCallSocket(socket);
+
   socket.on('admin:registration', (u) => {
     toast(`Nouvelle demande d'inscription : ${u.name}`);
     refreshPendingBadge();
@@ -358,7 +386,7 @@ function typingText(conversationId) {
 function notify(msg) {
   const conv = state.conversations.get(msg.conversationId);
   const title = conv ? conv.title : 'Nouveau message';
-  const text = msg.body || (msg.file ? `📎 ${msg.file.name}` : '');
+  const text = msg.body || (msg.file ? fileLabel(msg.file) : '');
   if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
     const n = new Notification(title, { body: `${msg.senderName}: ${text}`, icon: 'logo.svg', tag: `conv-${msg.conversationId}` });
     n.onclick = () => {
@@ -376,7 +404,7 @@ function previewText(conv) {
   if (t) return h('span', { class: 'typing' }, t);
   const m = conv.lastMessage;
   if (!m) return h('span', {}, conv.type === 'group' ? `${conv.members.length} membres` : 'Nouvelle discussion');
-  let text = m.deleted ? '🚫 Message supprimé' : m.body || (m.file ? `📎 ${m.file.name}` : '');
+  let text = m.deleted ? '🚫 Message supprimé' : m.body || (m.file ? fileLabel(m.file) : '');
   if (m.senderId === state.me.id) text = `Vous : ${text}`;
   else if (conv.type === 'group' && m.senderName) text = `${m.senderName.split(' ')[0]} : ${text}`;
   return h('span', {}, text);
@@ -417,6 +445,7 @@ function renderConversations() {
 
 // ------------------------------------------------------------ discussion active
 async function openChat(id) {
+  stopRecording(true);
   state.activeId = id;
   // Historique : le bouton « retour » du téléphone ramène à la liste des discussions.
   if (history.state && history.state.chat) history.replaceState({ chat: id }, '');
@@ -436,6 +465,7 @@ async function openChat(id) {
 }
 
 function closeChat() {
+  stopRecording(true);
   state.activeId = null;
   $('#chat-panel').hidden = true;
   $('#chat-empty').hidden = false;
@@ -473,6 +503,8 @@ function renderChatHeader() {
   if (!conv) return;
   fillAvatar($('#chat-avatar'), conv.title, { group: conv.type === 'group', online: conv.peer && conv.peer.online });
   $('#chat-title').textContent = conv.title;
+  $('#voice-call-btn').hidden = conv.type !== 'direct';
+  $('#video-call-btn').hidden = conv.type !== 'direct';
   const typing = typingText(conv.id);
   let sub;
   if (typing) sub = typing;
@@ -524,8 +556,15 @@ function renderMessages(scrollToBottom) {
       content.push(h('span', { class: 'body' }, '🚫 Ce message a été supprimé'));
     } else {
       if (m.file) {
-        if (/^image\/(png|jpe?g|gif|webp)$/.test(m.file.type)) {
+        const kind = fileKind(m.file);
+        if (kind === 'image') {
           content.push(h('img', { class: 'thumb', src: m.file.url, alt: m.file.name, loading: 'lazy', onclick: () => window.open(m.file.url, '_blank') }));
+        } else if (kind === 'video') {
+          content.push(h('video', { class: 'thumb', src: m.file.url, controls: true, preload: 'metadata', playsinline: true }));
+        } else if (kind === 'audio') {
+          content.push(h('div', { class: 'voice' },
+            avatar(m.senderName || '?'),
+            fixDuration(h('audio', { src: m.file.url, controls: true, preload: 'metadata' }))));
         } else {
           content.push(
             h('a', { class: 'file-card', href: `${m.file.url}?download`, download: m.file.name },
@@ -598,6 +637,7 @@ $('#composer').addEventListener('submit', async (e) => {
   if (!body || !state.activeId) return;
   input.value = '';
   autoGrow();
+  updateComposerButtons();
   sendTyping(false);
   try {
     const { message } = await api(`/api/conversations/${state.activeId}/messages`, { method: 'POST', body: { body } });
@@ -608,28 +648,123 @@ $('#composer').addEventListener('submit', async (e) => {
     }
   } catch (err) {
     input.value = body;
+    updateComposerButtons();
     toast(err.message, true);
   }
 });
 
-$('#file-input').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  e.target.value = '';
-  if (!file || !state.activeId) return;
-  if (file.size > 15 * 1024 * 1024) return toast('Fichier trop volumineux (15 Mo max).', true);
+const MAX_UPLOAD = 50 * 1024 * 1024;
+
+async function uploadFile(file, { caption = '', label } = {}) {
+  const conversationId = state.activeId;
+  if (!file || !conversationId) return;
+  if (file.size > MAX_UPLOAD) return toast('Fichier trop volumineux (50 Mo max).', true);
   const fd = new FormData();
-  fd.append('file', file);
-  const caption = input.value.trim();
+  fd.append('file', file, file.name || 'fichier');
   if (caption) fd.append('body', caption);
-  toast(`Envoi de « ${file.name} »…`);
+  toast(`Envoi ${label || `de « ${file.name} »`}…`);
   try {
-    await api(`/api/conversations/${state.activeId}/files`, { method: 'POST', body: fd });
-    input.value = '';
-    autoGrow();
+    await api(`/api/conversations/${conversationId}/files`, { method: 'POST', body: fd });
+    $('#toast').hidden = true;
+    return true;
   } catch (err) {
     toast(err.message, true);
+    return false;
   }
+}
+
+async function sendPickedFile(e, label) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  const caption = input.value.trim();
+  if (await uploadFile(file, { caption, label: label && label(file) })) {
+    input.value = '';
+    autoGrow();
+    updateComposerButtons();
+  }
+}
+
+$('#file-input').addEventListener('change', (e) => sendPickedFile(e));
+$('#media-input').addEventListener('change', (e) =>
+  sendPickedFile(e, (f) => (f.type.startsWith('video/') ? 'de la vidéo' : 'de la photo')));
+
+// Bouton micro (message vocal) quand la zone de saisie est vide, bouton envoyer sinon.
+function updateComposerButtons() {
+  const hasText = input.value.trim().length > 0;
+  $('#send-btn').hidden = !hasText;
+  $('#mic-btn').hidden = hasText;
+}
+input.addEventListener('input', updateComposerButtons);
+
+// ------------------------------------------------------------ messages vocaux
+const recorder = { media: null, stream: null, chunks: [], timer: null, started: 0, cancelled: false };
+
+function pickAudioType() {
+  if (!window.MediaRecorder) return null;
+  return ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+    .find((t) => MediaRecorder.isTypeSupported(t)) || '';
+}
+
+function micError(err) {
+  if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+    return "Accès au micro refusé. Autorisez le micro pour Agropama dans les paramètres du téléphone.";
+  }
+  if (err && err.name === 'NotFoundError') return 'Aucun micro détecté sur cet appareil.';
+  return "Impossible d'utiliser le micro.";
+}
+
+$('#mic-btn').addEventListener('click', async () => {
+  if (!state.activeId) return;
+  const type = pickAudioType();
+  if (type === null || !navigator.mediaDevices) return toast("L'enregistrement vocal n'est pas pris en charge ici.", true);
+  try {
+    recorder.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    return toast(micError(err), true);
+  }
+  recorder.chunks = [];
+  recorder.cancelled = false;
+  recorder.media = new MediaRecorder(recorder.stream, type ? { mimeType: type } : undefined);
+  recorder.media.ondataavailable = (e) => e.data.size && recorder.chunks.push(e.data);
+  recorder.media.onstop = finishRecording;
+  recorder.media.start(250);
+  recorder.started = Date.now();
+  $('#composer').hidden = true;
+  $('#recorder').hidden = false;
+  const tick = () => {
+    const sec = Math.floor((Date.now() - recorder.started) / 1000);
+    $('#rec-time').textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    if (sec >= 600) stopRecording(false); // 10 minutes maximum
+  };
+  tick();
+  recorder.timer = setInterval(tick, 500);
+  if (navigator.vibrate) navigator.vibrate(40);
 });
+
+function stopRecording(cancel) {
+  if (!recorder.media || recorder.media.state === 'inactive') return;
+  recorder.cancelled = cancel;
+  recorder.media.stop();
+}
+
+async function finishRecording() {
+  clearInterval(recorder.timer);
+  recorder.stream.getTracks().forEach((t) => t.stop());
+  $('#recorder').hidden = true;
+  $('#composer').hidden = false;
+  const duration = Date.now() - recorder.started;
+  const type = (recorder.media.mimeType || 'audio/webm').split(';')[0];
+  recorder.media = null;
+  if (recorder.cancelled) return;
+  if (duration < 800) return toast('Message vocal trop court.', true);
+  const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+  const file = new File(recorder.chunks, `message-vocal-${stamp}.${ext}`, { type });
+  uploadFile(file, { label: 'du message vocal' });
+}
+
+$('#rec-cancel').addEventListener('click', () => stopRecording(true));
+$('#rec-send').addEventListener('click', () => stopRecording(false));
 
 // ------------------------------------------------------------ modales
 const modal = $('#modal');
@@ -924,6 +1059,334 @@ async function openAdmin(filter) {
   adminView = { reload };
   await reload();
 }
+
+// ------------------------------------------------------------ appels vocaux et vidéo (WebRTC)
+const call = {
+  id: null, role: null, video: false, peer: null, conversationId: null,
+  pc: null, local: null, pending: [], accepted: false,
+  startedAt: 0, timer: null, stopTone: null, facing: 'user', iceServers: null,
+};
+
+const callScreen = $('#call-screen');
+const remoteVideo = $('#remote-video');
+const localVideo = $('#local-video');
+
+async function iceServers() {
+  if (!call.iceServers) {
+    try {
+      call.iceServers = (await api('/api/rtc-config')).iceServers;
+    } catch {
+      call.iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    }
+  }
+  return call.iceServers;
+}
+
+// Sonnerie générée par le navigateur (aucun fichier audio nécessaire).
+function playTone(kind) {
+  let ctx;
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch {
+    return () => {};
+  }
+  const freqs = kind === 'incoming' ? [880, 660] : [440, 480];
+  const beep = () => {
+    const t = ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freqs[i];
+      gain.gain.setValueAtTime(0.0001, t + i * 0.45);
+      gain.gain.exponentialRampToValueAtTime(kind === 'incoming' ? 0.25 : 0.08, t + i * 0.45 + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.45 + 0.4);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t + i * 0.45);
+      osc.stop(t + i * 0.45 + 0.42);
+    }
+    if (kind === 'incoming' && navigator.vibrate) navigator.vibrate([400, 200, 400]);
+  };
+  beep();
+  const interval = setInterval(beep, kind === 'incoming' ? 2500 : 3500);
+  return () => {
+    clearInterval(interval);
+    if (navigator.vibrate) navigator.vibrate(0);
+    ctx.close().catch(() => {});
+  };
+}
+
+function stopTone() {
+  if (call.stopTone) call.stopTone();
+  call.stopTone = null;
+}
+
+function setCallStatus(text) {
+  $('#call-status').textContent = text;
+}
+
+function showCallScreen(mode) {
+  const name = call.peer ? call.peer.name : '';
+  fillAvatar($('#call-avatar'), name);
+  $('#call-avatar').classList.add('big');
+  $('#call-name').textContent = name;
+  $('#incoming-actions').hidden = mode !== 'incoming';
+  $('#active-actions').hidden = mode === 'incoming';
+  $('#call-camera').hidden = !call.video;
+  $('#call-flip').hidden = !call.video;
+  localVideo.hidden = !call.video || !call.local;
+  remoteVideo.style.visibility = 'hidden';
+  callScreen.classList.toggle('video-on', false);
+  ['call-mute', 'call-camera'].forEach((id) => $(`#${id}`).classList.remove('off'));
+  callScreen.hidden = false;
+}
+
+function mediaError(err, video) {
+  if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+    return video
+      ? 'Accès au micro ou à la caméra refusé. Autorisez-les pour Agropama dans les paramètres du téléphone.'
+      : micError(err);
+  }
+  if (err && err.name === 'NotFoundError') return video ? 'Caméra ou micro introuvable.' : micError(err);
+  return "Impossible d'accéder au micro" + (video ? ' ou à la caméra.' : '.');
+}
+
+async function getLocalMedia(video) {
+  return navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    video: video ? { facingMode: call.facing, width: { ideal: 640 }, height: { ideal: 480 } } : false,
+  });
+}
+
+function attachLocal(stream) {
+  call.local = stream;
+  if (call.video) {
+    localVideo.srcObject = stream;
+    localVideo.hidden = false;
+    localVideo.classList.toggle('back', call.facing !== 'user');
+  }
+}
+
+async function createPeer() {
+  const pc = new RTCPeerConnection({ iceServers: await iceServers() });
+  call.pc = pc;
+  call.local.getTracks().forEach((t) => pc.addTrack(t, call.local));
+  pc.onicecandidate = (e) => {
+    if (e.candidate) state.socket.emit('call:signal', { callId: call.id, data: { candidate: e.candidate } });
+  };
+  pc.ontrack = (e) => {
+    remoteVideo.srcObject = e.streams[0];
+    remoteVideo.play().catch(() => {});
+    if (call.video) {
+      remoteVideo.style.visibility = 'visible';
+      callScreen.classList.add('video-on');
+    }
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected' && !call.startedAt) {
+      call.startedAt = Date.now();
+      const tick = () => {
+        const sec = Math.floor((Date.now() - call.startedAt) / 1000);
+        setCallStatus(`${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`);
+      };
+      tick();
+      call.timer = setInterval(tick, 1000);
+    } else if (pc.connectionState === 'failed') {
+      toast("La connexion de l'appel a échoué (réseau trop restrictif).", true);
+      hangUp();
+    }
+  };
+  return pc;
+}
+
+async function startCall(video) {
+  const conv = state.conversations.get(state.activeId);
+  if (!conv || conv.type !== 'direct' || !state.socket) return;
+  if (call.id || call.role) return toast('Un appel est déjà en cours.', true);
+  if (!window.RTCPeerConnection || !navigator.mediaDevices) return toast("Les appels ne sont pas pris en charge sur cet appareil.", true);
+  Object.assign(call, { role: 'caller', video, peer: conv.peer, conversationId: conv.id, facing: 'user' });
+  showCallScreen('outgoing');
+  setCallStatus('Préparation…');
+  try {
+    attachLocal(await getLocalMedia(video));
+  } catch (err) {
+    toast(mediaError(err, video), true);
+    return cleanupCall();
+  }
+  setCallStatus('Appel en cours…');
+  state.socket.emit('call:invite', { conversationId: conv.id, video }, (res) => {
+    if (!call.role) return; // annulé entre-temps
+    if (!res || res.error) {
+      toast((res && res.error) || "Impossible de lancer l'appel.", true);
+      return cleanupCall();
+    }
+    call.id = res.callId;
+    setCallStatus('Sonnerie…');
+    call.stopTone = playTone('outgoing');
+  });
+}
+
+async function acceptCall() {
+  stopTone();
+  setCallStatus('Connexion…');
+  $('#incoming-actions').hidden = true;
+  $('#active-actions').hidden = false;
+  $('#call-camera').hidden = !call.video;
+  $('#call-flip').hidden = !call.video;
+  try {
+    attachLocal(await getLocalMedia(call.video));
+  } catch (err) {
+    toast(mediaError(err, call.video), true);
+    state.socket.emit('call:decline', { callId: call.id });
+    return cleanupCall();
+  }
+  await createPeer();
+  state.socket.emit('call:accept', { callId: call.id }, (res) => {
+    if (res && res.error) {
+      toast(res.error, true);
+      cleanupCall();
+    } else {
+      call.accepted = true;
+    }
+  });
+}
+
+function hangUp() {
+  if (call.id && state.socket) {
+    const declining = call.role === 'callee' && !call.accepted && !call.pc;
+    state.socket.emit(declining ? 'call:decline' : 'call:end', { callId: call.id });
+  }
+  cleanupCall();
+}
+
+function cleanupCall(message) {
+  stopTone();
+  clearInterval(call.timer);
+  if (call.pc) call.pc.close();
+  if (call.local) call.local.getTracks().forEach((t) => t.stop());
+  remoteVideo.srcObject = null;
+  localVideo.srcObject = null;
+  Object.assign(call, { id: null, role: null, pc: null, local: null, pending: [], accepted: false, startedAt: 0, timer: null, peer: null });
+  if (message) {
+    setCallStatus(message);
+    $('#incoming-actions').hidden = true;
+    $('#active-actions').hidden = true;
+    setTimeout(() => { if (!call.role) callScreen.hidden = true; }, 1600);
+  } else {
+    callScreen.hidden = true;
+  }
+}
+
+async function handleSignal(data) {
+  const pc = call.pc;
+  if (!pc || !data) return;
+  try {
+    if (data.sdp) {
+      await pc.setRemoteDescription(data.sdp);
+      if (data.sdp.type === 'offer') {
+        await pc.setLocalDescription(await pc.createAnswer());
+        state.socket.emit('call:signal', { callId: call.id, data: { sdp: pc.localDescription } });
+      }
+      for (const c of call.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+    } else if (data.candidate) {
+      if (pc.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {});
+      else call.pending.push(data.candidate);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function setupCallSocket(socket) {
+  socket.on('call:incoming', (data) => {
+    if (call.role) return; // déjà en communication
+    Object.assign(call, {
+      id: data.callId, role: 'callee', video: data.video, conversationId: data.conversationId,
+      peer: state.users.get(data.from.id) || data.from, facing: 'user',
+    });
+    showCallScreen('incoming');
+    setCallStatus(data.video ? 'Appel vidéo entrant…' : 'Appel vocal entrant…');
+    call.stopTone = playTone('incoming');
+    if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+      new Notification(data.from.name, { body: data.video ? 'Appel vidéo entrant' : 'Appel vocal entrant', icon: 'logo.svg', tag: 'call' });
+    }
+  });
+
+  socket.on('call:accepted', async ({ callId }) => {
+    if (callId !== call.id) return;
+    stopTone();
+    setCallStatus('Connexion…');
+    call.accepted = true;
+    const pc = await createPeer();
+    await pc.setLocalDescription(await pc.createOffer());
+    socket.emit('call:signal', { callId, data: { sdp: pc.localDescription } });
+  });
+
+  socket.on('call:signal', ({ callId, data }) => {
+    if (callId === call.id) handleSignal(data);
+  });
+
+  socket.on('call:ended', ({ callId, reason }) => {
+    if (callId !== call.id) return;
+    const text = {
+      declined: 'Appel refusé',
+      missed: call.role === 'caller' ? 'Pas de réponse' : 'Appel manqué',
+      completed: 'Appel terminé',
+    }[reason];
+    cleanupCall(reason === 'answered-elsewhere' ? undefined : text);
+  });
+
+  socket.on('disconnect', () => {
+    if (call.role) cleanupCall('Connexion perdue');
+  });
+}
+
+$('#voice-call-btn').addEventListener('click', () => startCall(false));
+$('#video-call-btn').addEventListener('click', () => startCall(true));
+$('#call-accept').addEventListener('click', acceptCall);
+$('#call-decline').addEventListener('click', hangUp);
+$('#call-hangup').addEventListener('click', hangUp);
+
+$('#call-mute').addEventListener('click', (e) => {
+  if (!call.local) return;
+  const track = call.local.getAudioTracks()[0];
+  if (!track) return;
+  track.enabled = !track.enabled;
+  e.currentTarget.classList.toggle('off', !track.enabled);
+});
+
+$('#call-camera').addEventListener('click', (e) => {
+  if (!call.local) return;
+  const track = call.local.getVideoTracks()[0];
+  if (!track) return;
+  track.enabled = !track.enabled;
+  e.currentTarget.classList.toggle('off', !track.enabled);
+});
+
+$('#call-flip').addEventListener('click', async () => {
+  if (!call.local || !call.video) return;
+  const facing = call.facing === 'user' ? 'environment' : 'user';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 } } });
+    const newTrack = stream.getVideoTracks()[0];
+    const old = call.local.getVideoTracks()[0];
+    if (call.pc) {
+      const sender = call.pc.getSenders().find((snd) => snd.track && snd.track.kind === 'video');
+      if (sender) await sender.replaceTrack(newTrack);
+    }
+    if (old) {
+      call.local.removeTrack(old);
+      old.stop();
+    }
+    call.local.addTrack(newTrack);
+    call.facing = facing;
+    localVideo.srcObject = call.local;
+    localVideo.classList.toggle('back', facing !== 'user');
+  } catch {
+    toast("Impossible de changer de caméra.", true);
+  }
+});
+
+window.addEventListener('beforeunload', () => { if (call.role) hangUp(); });
 
 // ------------------------------------------------------------ amorçage
 document.addEventListener('visibilitychange', () => {

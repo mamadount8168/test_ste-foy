@@ -11,7 +11,10 @@ Les employés s'inscrivent eux-mêmes, mais un **administrateur doit valider cha
 - Discussions individuelles et **groupes** (création, ajout/retrait de membres, quitter)
 - Messages **en temps réel** (Socket.IO), indicateur « écrit… », présence en ligne / vu à
 - Accusés de lecture (✓ envoyé, ✓✓ bleu lu), compteur de non-lus
-- Envoi de **fichiers et photos** (15 Mo max, accessibles uniquement aux membres de la discussion)
+- Envoi de **photos, vidéos et documents** (50 Mo max, accessibles uniquement aux membres de la discussion)
+- **Messages vocaux** (bouton micro, jusqu'à 10 minutes)
+- **Appels vocaux et vidéo** en discussion individuelle (WebRTC) : sonnerie, répondre/refuser,
+  couper le micro ou la caméra, caméra avant/arrière ; appels manqués et durée affichés dans la discussion
 - Suppression de ses messages, liens cliquables, notifications du navigateur
 - Profil modifiable (coordonnées, mot de passe)
 - Interface responsive (ordinateur et téléphone), thème clair/sombre automatique
@@ -51,6 +54,8 @@ Si `ADMIN_PASSWORD` n'est pas fourni, un mot de passe aléatoire est généré e
 | `ADMIN_PASSWORD`  | Mot de passe du premier administrateur                      | généré aléatoirement      |
 | `ADMIN_NAME`      | Nom affiché du premier administrateur                       | `Administrateur Agropama` |
 | `JWT_SECRET`      | Clé de signature des sessions                               | générée dans `DATA_DIR`   |
+| `TURN_URLS`       | Serveur(s) TURN pour les appels, séparés par des virgules   | aucun (STUN Google seul)  |
+| `TURN_USERNAME` / `TURN_CREDENTIAL` | Identifiants du serveur TURN      | —                         |
 | `SECURE_COOKIES`  | `true` si l'application est servie en HTTPS (recommandé)    | `false`                   |
 
 ## Mise en production
@@ -58,6 +63,8 @@ Si `ADMIN_PASSWORD` n'est pas fourni, un mot de passe aléatoire est généré e
 - Servir l'application derrière un proxy HTTPS (Nginx, Caddy…) et définir `SECURE_COOKIES=true`.
   Le proxy doit laisser passer les WebSockets (`Upgrade` / `Connection`).
 - Sauvegarder régulièrement le dossier `DATA_DIR` (base `agropama.db` + `uploads/`).
+- Pour des appels fiables sur les réseaux mobiles (4G/5G), configurer un serveur **TURN**
+  (`TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`) — par ex. Cloudflare Realtime, Metered ou un coturn auto-hébergé.
 - Changer le mot de passe administrateur après la première connexion (menu « Mon profil »).
 
 ## Tests

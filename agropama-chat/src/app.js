@@ -11,9 +11,12 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const { Server } = require('socket.io');
 const { openDatabase, transaction } = require('./db');
+const { createCallManager } = require('./calls');
 
 const COOKIE = 'agropama_token';
-const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 Mo
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 Mo (photos, vidéos, messages vocaux)
+// Types affichés directement dans la discussion (les autres sont proposés au téléchargement).
+const INLINE_TYPES = /^(image\/(png|jpe?g|gif|webp)|video\/(mp4|webm|3gpp|quicktime)|audio\/(webm|ogg|mpeg|mp4|aac|wav|x-m4a|3gpp))$/;
 const PAGE_SIZE = 50;
 
 function createApp(options = {}) {
@@ -190,6 +193,18 @@ function createApp(options = {}) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({ app: 'agropama-chat', ok: true });
   });
+
+  // Serveurs STUN/TURN utilisés pour établir les appels (TURN recommandé pour les réseaux mobiles).
+  const iceServers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  const turnUrls = (options.turnUrls ?? process.env.TURN_URLS ?? '').split(',').map((u) => u.trim()).filter(Boolean);
+  if (turnUrls.length) {
+    iceServers.push({
+      urls: turnUrls,
+      username: options.turnUsername ?? process.env.TURN_USERNAME,
+      credential: options.turnCredential ?? process.env.TURN_CREDENTIAL,
+    });
+  }
+  app.get('/api/rtc-config', requireAuth, (req, res) => res.json({ iceServers }));
 
   const wrap = (fn) => (req, res, next) => {
     try {
@@ -521,7 +536,7 @@ function createApp(options = {}) {
     (req, res, next) =>
       upload.single('file')(req, res, (err) => {
         if (err) {
-          const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Fichier trop volumineux (15 Mo max).' : 'Échec du téléversement.';
+          const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Fichier trop volumineux (50 Mo max).' : 'Échec du téléversement.';
           return res.status(400).json({ error: msg });
         }
         next();
@@ -529,6 +544,8 @@ function createApp(options = {}) {
     wrap((req, res) => {
       if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu.' });
       const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8').slice(0, 200);
+      // Les navigateurs ajoutent parfois des paramètres (ex. « audio/webm;codecs=opus »).
+      req.file.mimetype = String(req.file.mimetype || 'application/octet-stream').split(';')[0].trim().toLowerCase();
       postMessage(req, res, {
         body: typeof req.body.body === 'string' ? req.body.body.trim().slice(0, 5000) : '',
         filePath: req.file.filename,
@@ -544,7 +561,7 @@ function createApp(options = {}) {
     if (!m || !m.file_path || m.deleted || !q.isMember.get(m.conversation_id, req.user.id)) {
       return res.status(404).json({ error: 'Fichier introuvable.' });
     }
-    const inline = /^image\/(png|jpe?g|gif|webp)$/.test(m.file_type) && req.query.download === undefined;
+    const inline = INLINE_TYPES.test(m.file_type) && req.query.download === undefined;
     res.setHeader('Content-Type', inline ? m.file_type : 'application/octet-stream');
     res.setHeader('Content-Security-Policy', "default-src 'none'");
     res.setHeader(
@@ -703,8 +720,23 @@ function createApp(options = {}) {
     next();
   });
 
+  const callManager = createCallManager({
+    io,
+    db,
+    online,
+    isMember: (cid, uid) => Boolean(q.isMember.get(cid, uid)),
+    memberIdsOf,
+    logToConversation(conversationId, text) {
+      if (!db.prepare('SELECT 1 FROM conversations WHERE id = ?').get(conversationId)) return;
+      const msg = insertSystemMessage(conversationId, text);
+      emitToUsers(memberIdsOf(conversationId), 'message:new', serializeMessage(msg));
+      broadcastConversation(conversationId);
+    },
+  });
+
   io.on('connection', (socket) => {
     const user = socket.data.user;
+    callManager.attach(socket);
     socket.join(`user:${user.id}`);
     if (user.role === 'admin') socket.join('admins');
 
