@@ -3,7 +3,7 @@
 Extension de navigateur (Manifest V3) qui bloque les publicités et traqueurs.
 
 ## Fonctionnement
-- `rules/ads.json` : règles réseau (declarativeNetRequest), générées par `gen_rules.py`. Ajoutez des domaines dans la liste `DOMAINS`, puis relancez `python3 gen_rules.py`.
+- `rules/ads.json` : ~189 000 domaines publicitaires (liste AdGuard DNS), convertis en règles declarativeNetRequest. Pour mettre à jour : télécharger `https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt` dans `lists/adguard-dns.txt`, puis `python3 gen_rules.py`.
 - `cosmetic.css` / `content.js` : masquent les emplacements publicitaires.
 - Aucune donnée n'est collectée ni envoyée : tout reste dans le navigateur.
 

@@ -1,0 +1,15 @@
+# Bloqueur de pubs pour tout le réseau (DNS). Usage : docker compose up -d
+# Puis ouvrir http://IP-DE-LA-MACHINE:3000 pour l'assistant de configuration.
+services:
+  adguardhome:
+    image: adguard/adguardhome:latest
+    container_name: adguardhome
+    restart: unless-stopped
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "3000:3000/tcp"   # assistant initial
+      - "80:80/tcp"       # interface web après configuration
+    volumes:
+      - ./work:/opt/adguardhome/work
+      - ./conf:/opt/adguardhome/conf

@@ -1,28 +1,39 @@
 #!/usr/bin/env python3
-"""Génère rules/ads.json (règles declarativeNetRequest) à partir d'une liste de domaines."""
-import json
-DOMAINS = """
+"""Génère rules/ads.json (declarativeNetRequest) à partir de la liste AdGuard DNS
+(lists/adguard-dns.txt) + domaines manuels. Usage : python3 gen_rules.py"""
+import json, os, re
+
+MANUAL = """
 doubleclick.net googlesyndication.com googleadservices.com adservice.google.com
-pagead2.googlesyndication.com googletagservices.com google-analytics.com
-googletagmanager.com adnxs.com adsrvr.org advertising.com criteo.com criteo.net
-taboola.com outbrain.com rubiconproject.com pubmatic.com openx.net casalemedia.com
-smartadserver.com amazon-adsystem.com moatads.com scorecardresearch.com
-quantserve.com adform.net adition.com 2mdn.net serving-sys.com yieldmo.com
-media.net bidswitch.net contextweb.com sharethrough.com teads.tv zedo.com
-popads.net popcash.net propellerads.com exoclick.com juicyads.com trafficjunky.net
-adcolony.com applovin.com unity3d.com/ads mopub.com inmobi.com chartboost.com
-facebook.net/en_US/fbevents.js connect.facebook.net hotjar.com mouseflow.com
-adsafeprotected.com doubleverify.com ads-twitter.com analytics.tiktok.com
+googletagservices.com adnxs.com adsrvr.org criteo.com criteo.net taboola.com
+outbrain.com rubiconproject.com pubmatic.com openx.net casalemedia.com
+amazon-adsystem.com moatads.com scorecardresearch.com quantserve.com
+popads.net propellerads.com exoclick.com hotjar.com ads-twitter.com
 """.split()
-rules = []
-for i, d in enumerate(DOMAINS, 1):
-    rules.append({
-        "id": i, "priority": 1,
-        "action": {"type": "block"},
-        "condition": {"urlFilter": f"||{d}^", "resourceTypes": [
-            "script", "image", "xmlhttprequest", "sub_frame", "stylesheet",
-            "media", "ping", "font", "other"]}
-    })
-with open("rules/ads.json", "w") as f:
-    json.dump(rules, f, indent=1)
-print(len(rules), "règles")
+
+DOM = re.compile(r"^\|\|([a-z0-9][a-z0-9.-]*\.[a-z]{2,})\^$")
+block, allow = set(MANUAL), set()
+path = "lists/adguard-dns.txt"
+if os.path.exists(path):
+    for line in open(path, encoding="utf-8", errors="ignore"):
+        line = line.strip()
+        if line.startswith("@@"):
+            m = DOM.match(line[2:])
+            if m: allow.add(m.group(1))
+        else:
+            m = DOM.match(line)
+            if m: block.add(m.group(1))
+block -= allow
+
+TYPES = ["script", "image", "xmlhttprequest", "sub_frame", "stylesheet",
+         "media", "ping", "font", "websocket", "other"]
+CHUNK = 1000
+rules, rid = [], 1
+for kind, domains, prio, action in (("block", sorted(block), 1, "block"),
+                                    ("allow", sorted(allow), 2, "allow")):
+    for i in range(0, len(domains), CHUNK):
+        rules.append({"id": rid, "priority": prio, "action": {"type": action},
+                      "condition": {"requestDomains": domains[i:i+CHUNK], "resourceTypes": TYPES}})
+        rid += 1
+json.dump(rules, open("rules/ads.json", "w"), separators=(",", ":"))
+print(f"{len(block)} domaines bloqués, {len(allow)} exceptions, {len(rules)} règles")
