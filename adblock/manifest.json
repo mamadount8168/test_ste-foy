@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Ste-Foy AdBlock",
+  "version": "1.0.0",
+  "description": "Bloque les publicités et les traqueurs, sans collecter aucune donnée.",
+  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback", "storage", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "ads", "enabled": true, "path": "rules/ads.json" }
+    ]
+  },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"], "css": ["cosmetic.css"], "run_at": "document_start", "all_frames": true }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Ste-Foy AdBlock" },
+  "browser_specific_settings": { "gecko": { "id": "adblock@ste-foy.local" } }
+}

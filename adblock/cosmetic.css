@@ -1,0 +1,8 @@
+/* Masque les emplacements publicitaires courants */
+ins.adsbygoogle, .adsbygoogle, [id^="google_ads_"], [id^="div-gpt-ad"],
+iframe[src*="doubleclick.net"], iframe[src*="googlesyndication"],
+.ad-banner, .ad-container, .ad-slot, .ad-wrapper, .advert, .advertisement,
+.sponsored-ad, .banner-ad, .ads-container, [class*="AdSlot"], [data-ad-slot],
+[aria-label="Publicité"], [aria-label="Advertisement"] {
+  display: none !important;
+}
