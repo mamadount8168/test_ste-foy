@@ -1,0 +1,25 @@
+name: Ghost Batterie APK
+
+on:
+  push:
+    paths: ["ghost-batterie/**", ".github/workflows/ghost-batterie.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ghost-batterie
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghost-batterie-apk
+          path: ghost-batterie/app/build/outputs/apk/debug/*.apk
