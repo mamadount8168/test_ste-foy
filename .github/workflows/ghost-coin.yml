@@ -1,0 +1,29 @@
+name: Ghost Coin
+
+on:
+  push:
+    paths: ["ghost-coin/**", ".github/workflows/ghost-coin.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ghost-coin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew :core:test :server:test :app:testDebugUnitTest
+      - run: ./gradlew :app:assembleDebug :server:fatJar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghost-coin
+          path: |
+            ghost-coin/app/build/outputs/apk/debug/*.apk
+            ghost-coin/server/build/libs/server-all.jar
+            ghost-coin/app/build/shots/*.png
