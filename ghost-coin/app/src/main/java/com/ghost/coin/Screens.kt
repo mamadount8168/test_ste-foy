@@ -21,6 +21,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -40,29 +44,65 @@ import kotlinx.coroutines.launch
 // ---------------------------------------------------------------- Construction
 
 @Composable
-fun BuildScreen(game: Game) = Sheet(game, "Construire") {
+fun BuildScreen(game: Game) {
     val s = game.state
-    val t = frameTime()
-    Canvas(Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(20.dp))) { villageScene(s.village, s.levels, s.damaged, t) }
-    T("${countryOf(s.village).flag} ${villageName(s.village)} — terminez les 8 emplacements pour ouvrir le pays suivant." + if (s.voucher) " Bon −50 % actif." else "", 12, Dim)
-    val pal = remember(s.village) { Look(s.village) }
-    for (b in 0 until 8) {
-        val lvl = s.levels[b]
-        val repair = s.damaged[b]
-        val max = lvl >= Rules.MAX_LEVEL && !repair
-        val price = if (repair) Rules.cost(s.village, b, lvl - 1) / 2 else if (max) 0 else Rules.cost(s.village, b, lvl) / (if (s.voucher) 2 else 1)
-        Card(border = if (repair) Danger else Color.White.copy(alpha = 0.12f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Canvas(Modifier.size(58.dp)) { building(b, maxOf(lvl, 1), repair, pal, size.width / 2, size.height * 0.96f, size.width * 0.62f, t) }
-                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                    T(BUILDINGS[b], 15, Ink, FontWeight.Bold)
-                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        repeat(Rules.MAX_LEVEL) { Box(Modifier.size(width = 22.dp, height = 7.dp).clip(CircleShape).background(if (it < lvl) Gold else Color(0x33FFFFFF))) }
+    val time = rememberTime()
+    var sel by remember { mutableIntStateOf(-1) }
+    val pop = remember { Animatable(1f) }
+    val built = s.stars
+    var seen by remember { mutableIntStateOf(built) }
+    LaunchedEffect(built) { if (built != seen) { seen = built; pop.snapTo(0f); pop.animateTo(1f, tween(900)) } }
+    val look = remember(s.village) { Look(s.village) }
+    Box(Modifier.fillMaxSize()) {
+        Backdrop()
+        Column(Modifier.fillMaxSize().systemBarsPadding()) {
+            Header(game, "Construire")
+            // Grande vue du village : le bâtiment choisi est entouré, une gerbe d'étoiles salue chaque amélioration.
+            Box(Modifier.fillMaxWidth().weight(0.4f).padding(horizontal = 16.dp).shadow(12.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val t = time.value
+                    villageScene(s.village, s.levels, s.damaged, t)
+                    if (sel >= 0) {
+                        val (x, base, u) = slot(sel, size)
+                        drawOval(Gold.copy(alpha = 0.55f + 0.3f * kotlin.math.abs(kotlin.math.sin(t * 4f))), Offset(x - u * 0.8f, base - u * 0.16f), Size(u * 1.6f, u * 0.34f), style = androidx.compose.ui.graphics.drawscope.Stroke(5f))
+                        val k = pop.value
+                        if (k < 1f) for (i in 0 until 12) { val a = i * 0.524f; star(Offset(x + kotlin.math.cos(a) * u * 1.3f * k, base - u * 0.6f + kotlin.math.sin(a) * u * 1.3f * k), u * 0.14f * (1f - k), if (i % 2 == 0) Gold else Color.White) }
                     }
-                    if (repair) T("Endommagé par une attaque", 11, Danger)
                 }
-                if (max) T("MAX", 14, Gold, FontWeight.Black)
-                else GButton(game, (if (repair) "Réparer\n" else "Améliorer\n") + fmt(price), Modifier.width(118.dp), if (repair) Danger else Gold, s.coins >= price, 12) { game.act("build", b) }
+                Column(Modifier.padding(12.dp).clip(RoundedCornerShape(16.dp)).background(Color(0x8C1B0B4A)).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    T("${look.c.flag}  ${villageName(s.village)}", 17, Ink, FontWeight.Black)
+                    Row(verticalAlignment = Alignment.CenterVertically) { Bar(s.levels.sum() / 24f, Gold, Modifier.width(130.dp)); T("  ${s.levels.sum()}/24", 12, Ink, FontWeight.Bold) }
+                }
+                if (s.voucher) T("Bon −50 % actif", 13, Color(0xFF3A1A00), FontWeight.Black, Modifier.align(Alignment.BottomEnd).padding(12.dp).clip(CircleShape).background(Gold).padding(horizontal = 12.dp, vertical = 5.dp))
+            }
+            Column(Modifier.fillMaxWidth().weight(0.6f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                for (b in 0 until 8) {
+                    val lvl = s.levels[b]
+                    val repair = s.damaged[b]
+                    val max = lvl >= Rules.MAX_LEVEL && !repair
+                    val price = if (repair) Rules.cost(s.village, b, lvl - 1) / 2 else if (max) 0 else Rules.cost(s.village, b, lvl) / (if (s.voucher) 2 else 1)
+                    Card(Modifier.clickable { sel = b }, if (repair) Danger else if (sel == b) Gold else Color.Transparent) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Illustration du bâtiment à son niveau actuel, sur le ciel du pays.
+                            Canvas(Modifier.size(92.dp).clip(RoundedCornerShape(20.dp)).background(Brush.verticalGradient(listOf(look.skyTop, look.skyBottom, look.ground)))) {
+                                val bounce = if (sel == b && pop.value < 1f) 1f + 0.25f * kotlin.math.sin(pop.value * 3.14f) else 1f
+                                drawRect(look.ground, Offset(0f, size.height * 0.78f), Size(size.width, size.height * 0.22f))
+                                building(b, maxOf(lvl, 1), repair, look, size.width * 0.46f, size.height * 0.9f, size.width * 0.5f * bounce, time.value)
+                                if (lvl == 0) drawRect(Color(0x99301580))
+                            }
+                            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                                T(BUILDINGS[b], 17, Ink, FontWeight.Black, lines = 1)
+                                T(if (repair) "Endommagé par une attaque" else if (max) "Terminé" else if (lvl == 0) "Terrain à bâtir" else "Niveau $lvl sur ${Rules.MAX_LEVEL}", 13, if (repair) Color(0xFFFFC2CC) else Dim, FontWeight.Bold, lines = 1)
+                                Bar(lvl / Rules.MAX_LEVEL.toFloat(), if (repair) Danger else Gold, Modifier.fillMaxWidth().padding(vertical = 6.dp))
+                                if (max) Row(verticalAlignment = Alignment.CenterVertically) { Canvas(Modifier.size(22.dp)) { star(Offset(size.width / 2, size.height / 2), size.width / 2, Gold) }; T("  Niveau maximal", 14, Gold, FontWeight.Black) }
+                                else Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(0, Modifier.size(22.dp)); T(" ${fmt(price)}", 15, if (s.coins >= price) Ink else Color(0xFFFFC2CC), FontWeight.Black, Modifier.weight(1f), lines = 1)
+                                    GButton(game, if (repair) "Réparer" else if (lvl == 0) "Bâtir" else "Améliorer", Modifier.testTag("build-$b").width(112.dp), if (repair) Danger else Gold, s.coins >= price, 15) { sel = b; game.act("build", b) }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -80,36 +120,48 @@ fun AttackScreen(game: Game) {
     var gain by remember { mutableLongStateOf(0L) }
     var done by remember { mutableStateOf(false) }
     val anim = remember { Animatable(0f) }
-    val t = frameTime()
-    Sheet(game, "Attaque") {
-        T("Village de ${target.name} · ${countryOf(target.village).flag} ${villageName(target.village)}", 14, Ink, FontWeight.Bold)
-        Canvas(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(20.dp)).border(1.5.dp, Electric, RoundedCornerShape(20.dp))) {
+    val time = rememberTime()
+    fun hit(b: Int) {
+        if (struck >= 0) return
+        scope.launch {
+            val r = game.send("hit", b, effects = false)
+            val e = r.events.firstOrNull { it.type == "attackResult" } ?: return@launch
+            blocked = e.m > 0; gain = r.events.firstOrNull { it.type == "coins" }?.n ?: 0; struck = b
+            kotlinx.coroutines.delay(280); game.sfx(Sfx.ATTACK)
+            anim.animateTo(1f, tween(1300, easing = LinearEasing))
+            game.play(r.events.filter { it.type == "coins" }); done = true
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Le village adverse en plein écran : on vise directement les bâtiments.
+        Canvas(Modifier.fillMaxSize()) {
+            val t = time.value
             val broken = List(8) { it == struck && !blocked && anim.value > 0.4f }
             villageScene(target.village, target.levels, broken, t, struck, anim.value)
-            if (struck >= 0 && blocked && anim.value > 0.2f) { val (x, base, u) = slot(struck, size); symbol(3, Offset(x, base - u * 0.6f), u * 0.7f) }
+            ghost(size.width * 0.5f, size.height * 0.82f, size.width * 0.13f, AVATARS[target.avatar % AVATARS.size], if (!done) (if (struck >= 0) Mood.HIT else Mood.IDLE) else if (blocked) Mood.WIN else Mood.SAD, t)
+            if (struck < 0) for (b in 0 until 8) if (target.levels[b] > 0) { // viseurs
+                val (x, base, u) = slot(b, size)
+                val o = Offset(x, base - u * 0.5f); val r = u * (0.42f + 0.05f * kotlin.math.sin(t * 5f + b))
+                drawCircle(Color.White, r, o, style = androidx.compose.ui.graphics.drawscope.Stroke(7f)); drawCircle(Danger, r, o, style = androidx.compose.ui.graphics.drawscope.Stroke(4f))
+                rotate(t * 60f, o) { for (i in 0 until 4) rotate(i * 90f, o) { drawLine(Danger, Offset(o.x, o.y - r * 1.3f), Offset(o.x, o.y - r * 0.7f), 6f, androidx.compose.ui.graphics.StrokeCap.Round) } }
+                drawCircle(Danger, r * 0.14f, o)
+            }
+            if (struck >= 0 && blocked && anim.value > 0.2f) { val (x, base, u) = slot(struck, size); drawCircle(Electric.copy(alpha = 0.35f), u * 0.9f, Offset(x, base - u * 0.5f)); symbol(3, Offset(x, base - u * 0.5f), u * 0.7f) }
+            drawRect(Brush.verticalGradient(listOf(Color(0x99140830), Color.Transparent), 0f, size.height * 0.22f), size = Size(size.width, size.height * 0.22f))
         }
-        if (done) Card(border = if (blocked) Electric else Gold) {
-            T(if (blocked) "Bloqué par un bouclier !" else "${BUILDINGS[struck]} détruit !", 18, if (blocked) Electric else Gold, FontWeight.Black)
-            T("Récompense : +${fmt(gain)} pièces", 14)
-            GButton(game, "Continuer", Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                if (game.state.attacks > 0) { game.screen = Screen.HOME; game.begin("attack") } else game.screen = Screen.HOME
-            }
-        } else {
-            T("Choisissez le bâtiment à viser", 13, Dim)
-            for (row in 0 until 4) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (b in listOf(row * 2, row * 2 + 1)) GButton(
-                    game, "${BUILDINGS[b]}\nniveau ${target.levels[b]}", Modifier.weight(1f), Electric, target.levels[b] > 0 && struck < 0, 12,
-                ) {
-                    scope.launch {
-                        val r = game.send("hit", b, effects = false)
-                        val e = r.events.firstOrNull { it.type == "attackResult" } ?: return@launch
-                        blocked = e.m > 0; gain = r.events.firstOrNull { it.type == "coins" }?.n ?: 0; struck = b
-                        game.sfx(Sfx.ATTACK)
-                        anim.animateTo(1f, tween(1300, easing = LinearEasing))
-                        game.play(r.events.filter { it.type == "coins" }); done = true
-                    }
-                }
-            }
+        if (struck < 0) for (b in 0 until 8) if (target.levels[b] > 0) {
+            val (x, base, u) = slot(b, Size(maxWidth.value, maxHeight.value))
+            Box(Modifier.offset((x - 38f).dp, (base - u * 0.5f - 38f).dp).size(76.dp).clip(CircleShape).testTag("target-$b").clickable { hit(b) })
+        }
+        Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
+            T("ATTAQUE", 28, Ink, FontWeight.Black, shadow = true)
+            T("Village de ${target.name} · ${countryOf(target.village).flag} ${villageName(target.village)}", 15, Ink, FontWeight.Bold, shadow = true)
+            Spacer(Modifier.weight(1f))
+            if (done) Card(border = if (blocked) Electric else Gold) {
+                T(if (blocked) "Bloqué par un bouclier !" else "${BUILDINGS[struck]} détruit !", 22, if (blocked) Color(0xFFBFF0FF) else Gold, FontWeight.Black)
+                Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Icon(0, Modifier.size(34.dp)); T("  +${fmt(gain)}", 24, Ink, FontWeight.Black) }
+                GButton(game, "Continuer", Modifier.fillMaxWidth(), size = 18) { if (game.state.attacks > 0) { game.screen = Screen.HOME; game.begin("attack") } else game.screen = Screen.HOME }
+            } else if (struck < 0) T("Touchez le bâtiment à frapper", 17, Ink, FontWeight.Black, Modifier.fillMaxWidth().clip(CircleShape).background(Color(0xB324105E)).padding(vertical = 12.dp), TextAlign.Center)
         }
     }
 }
@@ -124,120 +176,141 @@ fun RaidScreen(game: Game) {
     val pot = remember { game.state.raidPot }
     // Emplacement -> butin ; -1 = déjà creusé lors d'une session précédente.
     val found = remember { mutableStateMapOf<Int, Long>().apply { game.state.raidPicked.forEach { put(it, -1) } } }
+    val shownAt = remember { mutableStateMapOf<Int, Float>() }
     var done by remember { mutableStateOf(false) }
     var waiting by remember { mutableStateOf(false) }
-    val t = frameTime()
-    Sheet(game, "Raid") {
-        T("Trésor de ${target.name}", 14, Ink, FontWeight.Bold)
-        Card(border = Gold) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(1, Modifier.size(44.dp))
-                Column(Modifier.padding(start = 10.dp)) {
-                    T("Butin en jeu : ${fmt(pot)}", 17, Gold, FontWeight.Black)
-                    T("3 coups de pelle, 4 emplacements : l'un d'eux est vide.", 12, Dim)
-                }
-            }
-        }
-        for (row in 0 until 2) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            for (h in listOf(row * 2, row * 2 + 1)) {
+    val time = rememberTime()
+    val look = remember { Look(target.village) }
+    val spots = listOf(0.27f to 0.47f, 0.73f to 0.47f, 0.27f to 0.7f, 0.73f to 0.7f)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Canvas(Modifier.fillMaxSize()) {
+            val t = time.value
+            drawRect(Brush.verticalGradient(listOf(look.skyTop, look.skyBottom), 0f, size.height * 0.32f))
+            drawRect(Brush.verticalGradient(listOf(look.ground, look.groundDark), size.height * 0.3f, size.height), Offset(0f, size.height * 0.3f))
+            for (i in 0 until 6) tree(look.c.biome, size.width * (0.05f + i * 0.18f), size.height * 0.33f, size.height * 0.1f)
+            spots.forEachIndexed { h, (fx, fy) ->
+                val o = Offset(size.width * fx, size.height * fy); val u = size.width * 0.17f
                 val amount = found[h]
-                val shape = RoundedCornerShape(22.dp)
-                Box(
-                    Modifier.weight(1f).height(150.dp).clip(shape).background(Brush.verticalGradient(listOf(Color(0xFF2A1757), Color(0xFF120A26))))
-                        .border(2.dp, if (amount == null) Violet else if (amount > 0) Gold else Dim, shape)
-                        .clickable(enabled = amount == null && !done && !waiting) {
-                            waiting = true
-                            scope.launch {
-                                val r = game.send("dig", h, effects = false)
-                                val e = r.events.firstOrNull { it.type == "dig" }
-                                if (e != null) {
-                                    found[h] = e.n
-                                    if (e.n > 0) { game.burst++; game.sfx(Sfx.COIN) } else game.sfx(Sfx.LOSE)
-                                    done = e.ids.firstOrNull() == 1
-                                }
-                                waiting = false
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        val c = Offset(size.width / 2, size.height * 0.5f)
-                        if (amount == null) {
-                            drawOval(Color(0xFF3B2A14), Offset(c.x - size.width * 0.32f, c.y), Size(size.width * 0.64f, size.height * 0.36f))
-                            drawOval(Color(0xFF6B4B25), Offset(c.x - size.width * 0.28f, c.y - size.height * 0.06f), Size(size.width * 0.56f, size.height * 0.28f))
-                            star(Offset(c.x, c.y - size.height * 0.22f + kotlin.math.sin(t * 3f + h) * 6f), size.width * 0.07f, Gold)
-                        } else if (amount > 0) {
-                            chest(c, size.width * 0.2f, 2)
-                            for (i in 0 until 3) symbol(0, Offset(c.x + (i - 1) * size.width * 0.16f, c.y - size.height * 0.3f - kotlin.math.abs(kotlin.math.sin(t * 4f + i)) * 10f), size.width * 0.07f)
-                        } else ghost(c.x, c.y, size.width * 0.22f, Dim, Mood.SAD, t)
-                    }
-                    T(
-                        when { amount == null -> "Creuser"; amount > 0 -> "+${fmt(amount)}"; amount == 0L -> "Vide"; else -> "Déjà creusé" },
-                        14, if ((amount ?: 0) > 0) Gold else Ink, FontWeight.Black, Modifier.align(Alignment.BottomCenter).padding(10.dp),
-                    )
+                val k = shownAt[h]?.let { ((t - it) / 0.5f).coerceIn(0f, 1f) } ?: 1f
+                drawOval(Color.Black.copy(alpha = 0.25f), Offset(o.x - u * 1.1f, o.y + u * 0.25f), Size(u * 2.2f, u * 0.6f))
+                if (amount == null) { // monticule de terre fraîche, étincelle qui invite à creuser
+                    drawArc(Brush.verticalGradient(listOf(Color(0xFFB98A52), Color(0xFF6B4520)), o.y - u * 0.7f, o.y + u * 0.5f), 180f, 180f, true, Offset(o.x - u, o.y - u * 0.7f), Size(u * 2f, u * 2.2f))
+                    drawOval(Color(0xFFD2A46A), Offset(o.x - u * 0.55f, o.y - u * 0.55f), Size(u * 0.8f, u * 0.3f))
+                    for (i in 0 until 5) drawCircle(Color(0xFF55381A), u * 0.07f, Offset(o.x - u * 0.6f + i * u * 0.3f, o.y + u * 0.2f - (i % 2) * u * 0.15f))
+                    star(Offset(o.x + u * 0.3f, o.y - u * (0.95f + 0.12f * kotlin.math.sin(t * 3f + h))), u * 0.2f, Gold); star(Offset(o.x - u * 0.45f, o.y - u * 0.75f), u * 0.1f * kotlin.math.abs(kotlin.math.sin(t * 2f + h)), Color.White)
+                } else {
+                    drawOval(Color(0xFF2A1A0C), Offset(o.x - u * 0.9f, o.y), Size(u * 1.8f, u * 0.6f))
+                    if (amount > 0 || amount == -1L) {
+                        if (amount > 0) for (i in 0 until 12) rotate(t * 30f + i * 30f, o) { drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color(0x55FFE08A)), o.y - u * 2.2f, o.y), Offset(o.x - u * 0.12f, o.y - u * 2.2f * k), Size(u * 0.24f, u * 2.2f * k)) }
+                        chest(Offset(o.x, o.y - u * 0.25f * k), u * 0.75f * (0.4f + 0.6f * k), 2)
+                        if (amount > 0) for (i in 0 until 5) symbol(0, Offset(o.x + (i - 2) * u * 0.34f, o.y - u * (1.0f + 0.25f * kotlin.math.abs(kotlin.math.sin(t * 4f + i))) * k), u * 0.17f)
+                    } else ghost(o.x, o.y - u * 0.5f * k, u * 0.9f, Color(0xFFE8E0FF), Mood.SAD, t)
                 }
             }
+            drawRect(Brush.verticalGradient(listOf(Color(0x99140830), Color.Transparent), 0f, size.height * 0.2f), size = Size(size.width, size.height * 0.2f))
         }
-        if (done) Card(border = Gold) {
-            val total = found.values.filter { it > 0 }.sum()
-            T(if (found.values.none { it == 0L }) "Raid parfait !" else "Raid terminé", 18, Gold, FontWeight.Black)
-            T("Butin emporté : ${fmt(total)} pièces", 14)
-            GButton(game, "Continuer", Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                if (game.state.raids > 0) { game.screen = Screen.HOME; game.begin("raid") } else game.screen = Screen.HOME
+        spots.forEachIndexed { h, (fx, fy) ->
+            if (found[h] == null && !done) Box(
+                Modifier.offset((maxWidth.value * fx - 62f).dp, (maxHeight.value * fy - 62f).dp).size(124.dp).clip(CircleShape).testTag("dig-$h").clickable(enabled = !waiting) {
+                    waiting = true
+                    scope.launch {
+                        val r = game.send("dig", h, effects = false)
+                        val e = r.events.firstOrNull { it.type == "dig" }
+                        if (e != null) {
+                            found[h] = e.n; shownAt[h] = time.value
+                            if (e.n > 0) { game.burst++; game.sfx(Sfx.CHEST); game.feel(Mood.WIN) } else game.sfx(Sfx.LOSE)
+                            done = e.ids.firstOrNull() == 1
+                        }
+                        waiting = false
+                    }
+                },
+            )
+            val amount = found[h]
+            if (amount != null) T(if (amount > 0) "+${fmt(amount)}" else if (amount == 0L) "Vide" else "Déjà ouvert", 18, if (amount > 0) Gold else Ink, FontWeight.Black, Modifier.offset((maxWidth.value * fx - 60f).dp, (maxHeight.value * fy + 34f).dp).width(120.dp), TextAlign.Center, shadow = true)
+        }
+        Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
+            T("RAID", 28, Ink, FontWeight.Black, shadow = true)
+            T("Trésor de ${target.name} · ${look.c.flag} ${villageName(target.village)}", 15, Ink, FontWeight.Bold, shadow = true)
+            Row(Modifier.padding(top = 10.dp).clip(CircleShape).background(Color(0xB324105E)).padding(start = 6.dp, end = 18.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(1, Modifier.size(40.dp)); T("  ${fmt(pot)}", 24, Gold, FontWeight.Black); T("  en jeu", 14, Ink, FontWeight.Bold)
             }
-        } else T("Coups restants : ${Rules.RAID_DIGS - found.size}", 13, Dim)
+            Spacer(Modifier.weight(1f))
+            if (done) Card(border = Gold) {
+                val total = found.values.filter { it > 0 }.sum()
+                T(if (found.values.none { it == 0L }) "Raid parfait !" else "Raid terminé", 22, Gold, FontWeight.Black)
+                Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Icon(0, Modifier.size(34.dp)); T("  +${fmt(total)}", 24, Ink, FontWeight.Black) }
+                GButton(game, "Continuer", Modifier.fillMaxWidth(), size = 18) { if (game.state.raids > 0) { game.screen = Screen.HOME; game.begin("raid") } else game.screen = Screen.HOME }
+            } else T("Creusez 3 des 4 monticules : l'un d'eux est vide · reste ${Rules.RAID_DIGS - found.size}", 15, Ink, FontWeight.Black, Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Color(0xB324105E)).padding(horizontal = 14.dp, vertical = 12.dp), TextAlign.Center)
+        }
     }
 }
 
 // ---------------------------------------------------------------- Cartes
 
 @Composable
-fun CardsScreen(game: Game) = Sheet(game, "Collection") {
+fun CardsScreen(game: Game) {
     val s = game.state
     var album by remember { mutableIntStateOf(0) }
     var sel by remember { mutableIntStateOf(-1) }
-    T("${s.cards.size}/${CARDS.size} cartes découvertes · ${s.albums.size}/${ALBUMS.size} albums récompensés", 12, Dim)
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ALBUMS.forEachIndexed { i, name ->
-            val n = (0 until ALBUM_SIZE).count { (s.cards[i * ALBUM_SIZE + it] ?: 0) > 0 }
-            GButton(game, "$name $n/8", color = if (i == album) Gold else Violet, size = 12) { album = i; sel = -1 }
-        }
-    }
-    for (row in 0 until 2) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (k in 0 until 4) {
-            val id = album * ALBUM_SIZE + row * 4 + k
-            CardView(id, s.cards[id] ?: 0, Modifier.weight(1f), sel == id) { sel = id }
-        }
-    }
-    val complete = (0 until ALBUM_SIZE).all { (s.cards[album * ALBUM_SIZE + it] ?: 0) > 0 }
-    Card(border = if (complete && album !in s.albums) Gold else Color.White.copy(alpha = 0.12f)) {
-        T("Album ${ALBUMS[album]}", 15, Ink, FontWeight.Bold)
-        T("Récompense : ${30 + 10 * album} tours et ${fmt(Rules.unit(s.village) * 100)} pièces", 12, Dim)
-        when {
-            album in s.albums -> T("Récompense déjà récupérée", 12, Gold)
-            complete -> GButton(game, "Récupérer la récompense", Modifier.fillMaxWidth().padding(top = 8.dp)) { game.act("album", album) }
-            else -> T("Trouvez les 8 cartes pour la débloquer.", 12, Dim)
-        }
-    }
-    if (sel >= 0) {
-        val n = s.cards[sel] ?: 0
-        val r = rarityOf(sel)
-        Card(border = RARITY[r]) {
-            T(if (n > 0) CARDS[sel] else "Carte inconnue", 17, Ink, FontWeight.Black)
-            T("${RARITIES[r]} · " + if (n > 0) "possédée ×$n" else "à trouver dans les coffres", 12, RARITY[r], FontWeight.Bold)
-            if (n > 1) {
-                GButton(game, "Échanger ${n - 1} double(s) contre ${fmt(Rules.unit(s.village) * Rules.SELL[r] * (n - 1))}", Modifier.fillMaxWidth().padding(top = 8.dp), size = 13) { game.act("sell", sel) }
-                val pals = game.friends.filter { it.id != s.id }
-                if (game.online && pals.isNotEmpty()) {
-                    T("Offrir un double à un ami :", 12, Dim, modifier = Modifier.padding(top = 8.dp))
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pals.forEach { f -> GButton(game, f.name, color = Electric, size = 12) { game.sendCard(f.id, sel) } }
+    Box(Modifier.fillMaxSize()) {
+        Sheet(game, "Collection") {
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(9, Modifier.size(44.dp))
+                    Column(Modifier.padding(start = 12.dp)) {
+                        T("${s.cards.size} cartes sur ${CARDS.size}", 18, Ink, FontWeight.Black)
+                        Bar(s.cards.size / CARDS.size.toFloat(), Gold, Modifier.fillMaxWidth().padding(top = 6.dp))
                     }
+                }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ALBUMS.forEachIndexed { i, name ->
+                    val n = (0 until ALBUM_SIZE).count { (s.cards[i * ALBUM_SIZE + it] ?: 0) > 0 }
+                    GButton(game, "$name  $n/8", color = if (i == album) Gold else Color(0xFF8C6BF0), size = 14) { album = i }
+                }
+            }
+            for (row in listOf(0..2, 3..5, 6..7)) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (k in row) { val id = album * ALBUM_SIZE + k; CardView(id, s.cards[id] ?: 0, Modifier.weight(1f).testTag("card-$id")) { game.sfx(Sfx.CLICK); sel = id } }
+                if (row.count() == 2) Spacer(Modifier.weight(1f))
+            }
+            val have = (0 until ALBUM_SIZE).count { (s.cards[album * ALBUM_SIZE + it] ?: 0) > 0 }
+            Card(border = if (have == ALBUM_SIZE && album !in s.albums) Gold else Color.Transparent) {
+                T("Album ${ALBUMS[album]}", 18, Ink, FontWeight.Black)
+                Bar(have / ALBUM_SIZE.toFloat(), Gold, Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                T("Récompense : ${30 + 10 * album} tours et ${fmt(Rules.unit(s.village) * 100)} pièces", 14, Dim, FontWeight.Bold)
+                when {
+                    album in s.albums -> T("Récompense déjà récupérée", 14, Gold, FontWeight.Black)
+                    have == ALBUM_SIZE -> GButton(game, "Récupérer la récompense", Modifier.fillMaxWidth().padding(top = 8.dp), size = 16) { game.act("album", album) }
+                    else -> T("Encore ${ALBUM_SIZE - have} carte(s) à trouver.", 14, Dim)
+                }
+            }
+            GButton(game, "Ouvrir des coffres", Modifier.fillMaxWidth(), Electric, size = 16) { game.screen = Screen.SHOP }
+        }
+        // Carte en grand : présentation de vitrine, avec ses actions.
+        if (sel >= 0) {
+            val n = s.cards[sel] ?: 0
+            val r = rarityOf(sel)
+            val time = rememberTime()
+            Box(Modifier.fillMaxSize().background(Color(0xF2301580)).drawBehind {
+                if (n > 0 && r >= 3) { val o = Offset(size.width / 2, size.height * 0.36f); for (i in 0 until 16) rotate(time.value * 16f + i * 22.5f, o) { drawRect(Brush.verticalGradient(listOf(RARITY[r].copy(alpha = 0.4f), Color.Transparent), o.y - size.height * 0.8f, o.y), Offset(o.x - size.width * 0.05f, o.y - size.height * 0.8f), Size(size.width * 0.1f, size.height * 0.8f)) } }
+            }.clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) { sel = -1 }, contentAlignment = Alignment.Center) {
+                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CardView(sel, n, Modifier.width(230.dp))
+                    T(RARITIES[r], 20, if (r == 0) Ink else RARITY[r], FontWeight.Black, shadow = true)
+                    T(if (n > 0) "Possédée ×$n" else "À trouver dans les coffres", 15, Ink, FontWeight.Bold)
+                    if (n > 1) {
+                        GButton(game, "Échanger ${n - 1} double(s) contre ${fmt(Rules.unit(s.village) * Rules.SELL[r] * (n - 1))}", Modifier.fillMaxWidth(), size = 15) { game.act("sell", sel) }
+                        val pals = game.friends.filter { it.id != s.id }
+                        if (game.online && pals.isNotEmpty()) {
+                            T("Offrir un double à un ami", 14, Dim, FontWeight.Bold)
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { pals.forEach { f -> GButton(game, f.name, color = Electric, size = 14) { game.sendCard(f.id, sel) } } }
+                        }
+                    }
+                    GButton(game, "Fermer", Modifier.width(180.dp), Color(0xFF8C6BF0), size = 16) { sel = -1 }
                 }
             }
         }
     }
-    GButton(game, "Obtenir des cartes : ouvrir des coffres", Modifier.fillMaxWidth(), Violet) { game.screen = Screen.SHOP }
 }
 
 // ---------------------------------------------------------------- Boutique
@@ -246,26 +319,26 @@ fun CardsScreen(game: Game) = Sheet(game, "Collection") {
 fun ShopScreen(game: Game) = Sheet(game, "Boutique") {
     val s = game.state
     val wait = s.freeChestAt - game.now
-    Card(border = if (wait <= 0) Gold else Color.White.copy(alpha = 0.12f)) {
+    Card(border = if (wait <= 0) Gold else Color.Transparent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Canvas(Modifier.size(64.dp)) { chest(Offset(size.width / 2, size.height * 0.55f), size.width * 0.42f, 0) }
+            Canvas(Modifier.size(58.dp)) { chest(Offset(size.width / 2, size.height * 0.55f), size.width * 0.42f, 0) }
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 T("Coffre gratuit", 16, Ink, FontWeight.Bold)
                 T("${game.event.freeCards} cartes, toutes les 4 heures", 12, Dim)
             }
-            GButton(game, if (wait <= 0) "Ouvrir" else "%d:%02d:%02d".format(wait / 3_600_000, wait / 60_000 % 60, wait / 1000 % 60), Modifier.width(112.dp), enabled = wait <= 0) { game.act("freeChest") }
+            GButton(game, if (wait <= 0) "Ouvrir" else "%d:%02d:%02d".format(wait / 3_600_000, wait / 60_000 % 60, wait / 1000 % 60), Modifier.width(104.dp), enabled = wait <= 0) { game.act("freeChest") }
         }
     }
     CHESTS.forEachIndexed { i, c ->
         val price = Rules.unit(s.village) * c.price
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Canvas(Modifier.size(64.dp)) { chest(Offset(size.width / 2, size.height * 0.55f), size.width * 0.42f, i) }
+                Canvas(Modifier.size(58.dp)) { chest(Offset(size.width / 2, size.height * 0.55f), size.width * 0.42f, i) }
                 Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                     T(c.name, 16, Ink, FontWeight.Bold)
                     T("${c.cards} cartes · légendaire ${c.odds[3] / 10f} % · mythique ${c.odds[4] / 10f} %", 11, Dim)
                 }
-                GButton(game, fmt(price), Modifier.width(112.dp), enabled = s.coins >= price) { game.act("chest", i) }
+                GButton(game, fmt(price), Modifier.width(104.dp), enabled = s.coins >= price) { game.act("chest", i) }
             }
         }
     }
@@ -423,7 +496,7 @@ fun SocialScreen(game: Game) = Sheet(game, "Social") {
         val rows = if (world) game.board else game.friends
         if (rows.isEmpty()) T("Classement en cours de chargement…", 12, Dim)
         rows.forEachIndexed { i, r ->
-            Card(border = if (r.id == s.id) Gold else Color.White.copy(alpha = 0.12f)) {
+            Card(border = if (r.id == s.id) Gold else Color.Transparent) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     T("${i + 1}", 16, Gold, FontWeight.Black, Modifier.width(30.dp))
                     Canvas(Modifier.size(34.dp).clip(CircleShape).background(Violet)) { ghost(size.width / 2, size.height * 0.52f, size.width * 0.6f, AVATARS[r.avatar % AVATARS.size], Mood.IDLE, 0f) }
@@ -440,8 +513,12 @@ fun SocialScreen(game: Game) = Sheet(game, "Social") {
 // ---------------------------------------------------------------- Réglages
 
 @Composable
-fun SettingsScreen(game: Game) = Sheet(game, "Réglages") {
+fun SettingsScreen(game: Game) = Sheet(game, "Profil") {
     val s = game.state
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        GButton(game, "Amis et classement", Modifier.weight(1f), Electric, size = 14) { game.screen = Screen.SOCIAL }
+        GButton(game, "Tour du monde", Modifier.weight(1f), Color(0xFF2FB673), size = 14) { game.screen = Screen.MAP }
+    }
     var name by remember { mutableStateOf(s.name) }
     var avatar by remember { mutableIntStateOf(s.avatar) }
     Card {
@@ -466,7 +543,7 @@ fun SettingsScreen(game: Game) = Sheet(game, "Réglages") {
         T("Effets sonores · ${(sfx * 100).toInt()} %", 12, Dim)
         Slider(sfx, { sfx = it; game.audio?.sfxVolume = it }, onValueChangeFinished = { game.sfx(Sfx.COIN) }, colors = colors)
     }
-    Card(border = if (game.online) Electric else Color.White.copy(alpha = 0.12f)) {
+    Card(border = if (game.online) Electric else Color.Transparent) {
         T("Compte", 15, Ink, FontWeight.Bold)
         if (game.online) {
             T("En ligne sur ${game.serverUrl}", 12, Electric)
@@ -481,5 +558,5 @@ fun SettingsScreen(game: Game) = Sheet(game, "Réglages") {
             GButton(game, "Jouer en ligne", Modifier.fillMaxWidth().padding(top = 10.dp), Electric, size = 13) { game.screen = Screen.SOCIAL }
         }
     }
-    T("Ghost Coin 0.2.0", 11, Dim, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
+    T("Ghost Coin 0.3.0", 11, Dim, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
 }

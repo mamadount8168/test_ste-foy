@@ -22,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -46,6 +47,28 @@ import kotlin.math.sin
 
 // ---------------------------------------------------------------- Carte du monde
 
+/** Contours simplifiés des terres (latitude, longitude), pour donner à la carte sa vraie forme. */
+private val LAND = listOf(
+    floatArrayOf(37f, 10f, 33f, -8f, 21f, -17f, 15f, -17f, 10f, -15f, 5f, -8f, 4f, 7f, -5f, 12f, -17f, 12f, -29f, 17f, -34f, 19f, -34f, 26f, -26f, 33f, -16f, 40f, -5f, 39f, 2f, 45f, 12f, 51f, 11f, 43f, 15f, 39f, 22f, 37f, 30f, 32f, 31f, 25f, 33f, 12f),
+    floatArrayOf(-13f, 49f, -17f, 50f, -25f, 47f, -24f, 44f, -16f, 44f),
+    floatArrayOf(36f, -6f, 43f, -9f, 48f, -5f, 51f, 2f, 54f, 8f, 57f, 8f, 58f, 6f, 62f, 5f, 70f, 20f, 71f, 28f, 68f, 44f, 68f, 60f, 52f, 60f, 46f, 48f, 46f, 38f, 46f, 30f, 41f, 29f, 37f, 24f, 40f, 19f, 44f, 13f, 38f, 16f, 42f, 12f, 44f, 8f, 43f, 3f, 37f, -2f),
+    floatArrayOf(50f, -5f, 54f, -3f, 58f, -6f, 58f, -2f, 53f, 1f, 51f, 1f),
+    floatArrayOf(52f, -10f, 55f, -8f, 54f, -6f, 52f, -6f),
+    floatArrayOf(64f, -24f, 66f, -18f, 65f, -14f, 63f, -19f),
+    floatArrayOf(70f, -160f, 71f, -125f, 68f, -95f, 60f, -94f, 55f, -80f, 60f, -65f, 47f, -53f, 44f, -66f, 35f, -76f, 25f, -80f, 30f, -90f, 26f, -97f, 18f, -95f, 21f, -87f, 15f, -83f, 9f, -79f, 8f, -83f, 15f, -93f, 22f, -106f, 32f, -117f, 48f, -125f, 58f, -136f, 60f, -147f, 55f, -163f),
+    floatArrayOf(12f, -72f, 10f, -62f, 5f, -52f, -5f, -35f, -13f, -38f, -23f, -42f, -35f, -56f, -41f, -63f, -52f, -69f, -55f, -70f, -46f, -75f, -30f, -72f, -18f, -71f, -5f, -81f, 1f, -79f, 8f, -77f),
+    floatArrayOf(23f, -84f, 22f, -78f, 20f, -74f, 20f, -77f, 22f, -82f),
+    floatArrayOf(20f, -74f, 20f, -69f, 18f, -68f, 18f, -74f),
+    floatArrayOf(41f, 29f, 46f, 38f, 46f, 48f, 52f, 60f, 68f, 60f, 73f, 80f, 77f, 105f, 72f, 130f, 70f, 160f, 66f, 180f, 60f, 165f, 52f, 157f, 60f, 143f, 53f, 141f, 43f, 132f, 39f, 128f, 35f, 129f, 37f, 122f, 30f, 122f, 22f, 114f, 21f, 107f, 9f, 105f, 13f, 100f, 1f, 104f, 7f, 99f, 16f, 95f, 22f, 91f, 16f, 81f, 8f, 77f, 20f, 72f, 25f, 66f, 25f, 57f, 30f, 49f, 24f, 52f, 17f, 55f, 13f, 45f, 21f, 39f, 28f, 35f, 31f, 34f, 36f, 36f, 37f, 28f),
+    floatArrayOf(31f, 130f, 34f, 135f, 36f, 141f, 41f, 141f, 45f, 142f, 43f, 140f, 36f, 137f, 34f, 131f),
+    floatArrayOf(5f, 95f, -6f, 105f, -8f, 115f, -9f, 125f, -3f, 135f, -9f, 141f, -2f, 141f, 1f, 125f, 4f, 118f, 7f, 117f, 1f, 110f),
+    floatArrayOf(18f, 120f, 14f, 124f, 6f, 126f, 9f, 122f, 14f, 120f),
+    floatArrayOf(10f, 80f, 6f, 82f, 7f, 80f),
+    floatArrayOf(-3f, 141f, -6f, 147f, -10f, 150f, -9f, 143f),
+    floatArrayOf(-11f, 132f, -12f, 137f, -11f, 142f, -19f, 147f, -28f, 153f, -37f, 150f, -39f, 146f, -35f, 138f, -32f, 133f, -34f, 123f, -34f, 115f, -22f, 114f, -17f, 123f, -14f, 129f),
+    floatArrayOf(-35f, 173f, -38f, 178f, -41f, 175f, -46f, 170f, -44f, 168f, -41f, 172f),
+)
+
 @Composable
 fun MapScreen(game: Game) = Sheet(game, "Tour du monde") {
     val s = game.state
@@ -59,7 +82,7 @@ fun MapScreen(game: Game) = Sheet(game, "Tour du monde") {
         Continent.entries.forEachIndexed { i, c ->
             val open = lap > 0 || here >= CONTINENT_START[i]
             val done = (here - CONTINENT_START[i]).coerceIn(0, CONTINENT_START[i + 1] - CONTINENT_START[i])
-            GButton(game, (if (open) "" else "🔒 ") + "${c.label} ${if (lap > 0) CONTINENT_START[i + 1] - CONTINENT_START[i] else done}/${CONTINENT_START[i + 1] - CONTINENT_START[i]}", color = if (c == continent) Gold else if (open) Violet else Color(0xFF4A3F66), size = 12) { continent = c }
+            GButton(game, (if (open) "" else "🔒 ") + "${c.label} ${if (lap > 0) CONTINENT_START[i + 1] - CONTINENT_START[i] else done}/${CONTINENT_START[i + 1] - CONTINENT_START[i]}", color = if (c == continent) Gold else if (open) Color(0xFF8C6BF0) else Color(0xFF6E5BA8), size = 14) { continent = c }
         }
     }
 
@@ -72,7 +95,7 @@ fun MapScreen(game: Game) = Sheet(game, "Tour du monde") {
     val south by animateFloatAsState(list.minOf { it.value.lat } - 7f, tween(700), label = "s")
     val shape = RoundedCornerShape(22.dp)
     Canvas(
-        Modifier.fillMaxWidth().height(330.dp).clip(shape).border(1.5.dp, Electric.copy(alpha = 0.7f), shape)
+        Modifier.fillMaxWidth().height(360.dp).shadow(12.dp, shape).clip(shape)
             .pointerInput(continent) {
                 detectTapGestures { tap ->
                     val best = list.minByOrNull { (_, c) -> hypot(tap.x - (lon(c) - west) / (east - west) * size.width, tap.y - (north - c.lat) / (north - south) * size.height) }
@@ -81,22 +104,31 @@ fun MapScreen(game: Game) = Sheet(game, "Tour du monde") {
             },
     ) {
         clipRect {
-            drawRect(Brush.verticalGradient(listOf(Color(0xFF0B1E4A), Color(0xFF123A7A), Color(0xFF0B1E4A))))
-            for (g in -180..540 step 20) { val x = (g - west) / (east - west) * size.width; drawLine(Color(0x22FFFFFF), Offset(x, 0f), Offset(x, size.height), 1f) }
-            for (g in -80..80 step 20) { val y = (north - g) / (north - south) * size.height; drawLine(Color(0x22FFFFFF), Offset(0f, y), Offset(size.width, y), 1f) }
+            drawRect(Brush.verticalGradient(listOf(Color(0xFF4FC3F7), Color(0xFF2E8FE8), Color(0xFF2468D0))))
+            // Terres en relief : une ombre décalée puis la terre, éclaircie vers le nord.
+            for (pass in 0..1) LAND.forEach { poly ->
+                val path = androidx.compose.ui.graphics.Path()
+                for (i in poly.indices step 2) { val x = (poly[i + 1] - west) / (east - west) * size.width; val y = (north - poly[i]) / (north - south) * size.height + (if (pass == 0) 7f else 0f); if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }
+                path.close()
+                if (pass == 0) drawPath(path, Color(0xFF1A4FA8)) else { drawPath(path, Brush.verticalGradient(listOf(Color(0xFFB8E986), Color(0xFF6CC56A), Color(0xFF4FA85A)))); drawPath(path, Color(0xFFEFFFD6), style = androidx.compose.ui.graphics.drawscope.Stroke(2.5f)) }
+            }
+            for (g in -180..540 step 20) { val x = (g - west) / (east - west) * size.width; drawLine(Color(0x33FFFFFF), Offset(x, 0f), Offset(x, size.height), 1f) }
+            for (g in -80..80 step 20) { val y = (north - g) / (north - south) * size.height; drawLine(Color(0x33FFFFFF), Offset(0f, y), Offset(size.width, y), 1f) }
             fun at(c: Country) = Offset((lon(c) - west) / (east - west) * size.width, (north - c.lat) / (north - south) * size.height)
             // Terres : un halo par pays dessine la silhouette du continent.
-            list.forEach { (_, c) -> drawCircle(Color(0xFF2E7D4F).copy(alpha = 0.55f), size.width * 0.06f, at(c)) }
+            if (continent == Continent.OCEANIE || continent == Continent.AMERIQUE || continent == Continent.AFRIQUE) list.forEach { (_, c) -> if (c.biome == 'c') { drawCircle(Color(0xFFFFF2B0), size.width * 0.022f, at(c)); drawCircle(Color(0xFF6CC56A), size.width * 0.015f, at(c)) } }
             // Itinéraire du voyage, dans l'ordre des pays.
-            list.zipWithNext().forEach { (a, b) -> drawLine(if (lap > 0 || b.index <= here) Gold.copy(alpha = 0.8f) else Color(0x44FFFFFF), at(a.value), at(b.value), 2.5f) }
+            list.zipWithNext().forEach { (a, b) -> if (lap > 0 || b.index <= here) { drawLine(Color(0xFF7A4A00), at(a.value), at(b.value), 6f, androidx.compose.ui.graphics.StrokeCap.Round); drawLine(Gold, at(a.value), at(b.value), 3.5f, androidx.compose.ui.graphics.StrokeCap.Round) } }
             list.forEach { (i, c) ->
                 val o = at(c)
                 val done = lap > 0 || i < here
-                val r = size.width * 0.017f
-                if (i == here) drawCircle(Gold.copy(alpha = 0.35f + 0.3f * abs(sin(t * 3f))), r * (2.2f + 0.6f * abs(sin(t * 3f))), o)
-                if (i == sel) drawCircle(Color.White, r * 1.7f, o)
-                drawCircle(if (done) Gold else if (i == here) Electric else Color(0xFF55607A), r * 1.2f, o)
-                if (done) star(o, r * 0.8f, Night)
+                val r = size.width * 0.02f
+                if (i == here) drawCircle(Color.White.copy(alpha = 0.5f + 0.4f * abs(sin(t * 3f))), r * (2.4f + 0.8f * abs(sin(t * 3f))), o, style = androidx.compose.ui.graphics.drawscope.Stroke(5f))
+                if (i == sel) drawCircle(Color.White, r * 1.9f, o)
+                drawCircle(Color(0x55000000), r * 1.25f, Offset(o.x, o.y + 3f))
+                drawCircle(if (done) GoldDark else if (i == here) Color(0xFF1C4FD0) else Color(0xFF5A6480), r * 1.3f, o)
+                drawCircle(if (done) Gold else if (i == here) Electric else Color(0xFFB9C2D6), r, o)
+                if (done) star(o, r * 0.75f, Color(0xFF7A4A00))
             }
             val c = COUNTRIES[here]
             if (c.continent == continent) ghost(at(c).x, at(c).y - size.width * 0.06f, size.width * 0.06f, AVATARS[s.avatar], Mood.IDLE, t)
@@ -107,7 +139,7 @@ fun MapScreen(game: Game) = Sheet(game, "Tour du monde") {
     val c = COUNTRIES[sel]
     val done = lap > 0 || sel < here
     val current = sel == here
-    Card(border = if (done) Gold else if (current) Electric else Color.White.copy(alpha = 0.12f)) {
+    Card(border = if (done) Gold else if (current) Electric else Color.Transparent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             T(c.flag, 40)
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -136,11 +168,11 @@ fun MapScreen(game: Game) = Sheet(game, "Tour du monde") {
             pair.forEach { (i, k) ->
                 val sh = RoundedCornerShape(12.dp)
                 Row(
-                    Modifier.weight(1f).clip(sh).background(if (i == sel) Color(0xFF3A2470) else Panel).border(1.dp, if (lap > 0 || i < here) Gold.copy(alpha = 0.7f) else if (i == here) Electric else Color(0x22FFFFFF), sh)
-                        .clickable { sel = i }.padding(horizontal = 8.dp, vertical = 7.dp),
+                    Modifier.weight(1f).heightIn(min = 48.dp).clip(sh).background(if (i == sel) Color(0xFF8C6BF0) else Color(0xFF5330C4))
+                        .clickable { sel = i }.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    T(k.flag, 16); T(k.name, 12, if (lap > 0 || i <= here) Ink else Dim, FontWeight.Bold, Modifier.weight(1f).padding(horizontal = 6.dp), lines = 1)
+                    T(k.flag, 18); T(k.name, 13, if (lap > 0 || i <= here) Ink else Dim, FontWeight.Bold, Modifier.weight(1f).padding(horizontal = 6.dp), lines = 1)
                     T(if (lap > 0 || i < here) "★" else if (i == here) "●" else "🔒", 11, if (i == here) Electric else Gold)
                 }
             }
@@ -157,7 +189,7 @@ fun Cinematic(game: Game) {
     val a = remember(n) { Animatable(0f) }
     LaunchedEffect(n) { game.sfx(Sfx.WIN); a.animateTo(1f, tween(4500)) }
     val next = Continent.entries[(n + 1) % Continent.entries.size]
-    Box(Modifier.fillMaxSize().background(Color(0xF5060312)).clickable(remember { MutableInteractionSource() }, null) { if (a.value > 0.5f) game.cinematic = -1 }, contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFA4A22B8), Color(0xFA24105E)))).clickable(remember { MutableInteractionSource() }, null) { if (a.value > 0.5f) game.cinematic = -1 }, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val c = Offset(size.width / 2, size.height * 0.4f); val r = size.width * 0.3f * (0.6f + 0.4f * a.value)
             repeat(60) { val ang = it * 2.4f; val d = (it * 37 % 100) / 100f; drawCircle(Color.White.copy(alpha = 0.5f * abs(sin(a.value * 8f + it))), 2.5f, Offset(size.width * ((cos(ang) * d + 1f) / 2f), size.height * ((sin(ang) * d + 1f) / 2f))) }
@@ -242,7 +274,7 @@ private fun Editor(game: Game, s: GameState, run: (AdminCmd) -> Unit) {
 }
 
 @Composable
-fun AdminScreen(game: Game) = Sheet(game, "GHOST ADMIN") {
+fun AdminScreen(game: Game) = Sheet(game, "Ghost Admin") {
     val logged = game.adminToken.isNotEmpty()
     // Le bac à sable local sans serveur n'existe que dans l'APK de test (debug) ; l'APK publié exige la session serveur.
     var local by remember { mutableStateOf(false) }
@@ -310,7 +342,7 @@ fun AdminScreen(game: Game) = Sheet(game, "GHOST ADMIN") {
             }
             T("${game.adminRows.size} comptes (les plus récemment actifs d'abord)", 12, Dim)
             game.adminRows.forEach { r ->
-                Card(border = if (r.id == p?.id) Gold else if (r.test) Danger.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f), modifier = Modifier.clickable { game.adminDo(Req(op = "player", to = r.id)) }) {
+                Card(border = if (r.id == p?.id) Gold else if (r.test) Danger.copy(alpha = 0.6f) else Color.Transparent, modifier = Modifier.clickable { game.adminDo(Req(op = "player", to = r.id)) }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             T((if (r.test) "[TEST] " else "") + r.name, 14, Ink, FontWeight.Bold)
@@ -355,7 +387,7 @@ fun AdminScreen(game: Game) = Sheet(game, "GHOST ADMIN") {
             if (game.adminEvents.isEmpty()) T("Aucun événement administrateur : le calendrier automatique s'applique (${Rules.event(game.now).name} aujourd'hui).", 12, Dim)
             game.adminEvents.forEach { e ->
                 val status = when { !e.enabled -> "Arrêté"; e.active(game.now) -> "Actif"; game.now < e.start -> "Programmé dans ${(e.start - game.now) / 60_000} min"; else -> "Terminé" }
-                Card(border = if (e.active(game.now)) Gold else Color.White.copy(alpha = 0.12f)) {
+                Card(border = if (e.active(game.now)) Gold else Color.Transparent) {
                     T(e.name, 15, Ink, FontWeight.Bold); T(e.text, 12, Dim)
                     T("$status · pièces ${e.coins} % · raids ${e.raid} % · attaques ${e.attack} % · ${e.freeCards} cartes", 11, if (e.active(game.now)) Gold else Dim)
                     Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

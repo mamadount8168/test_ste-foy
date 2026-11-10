@@ -28,13 +28,15 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 val Night = Color(0xFF0A0616)
-val Panel = Color(0xFF1A1033)
+val Panel = Color(0xFF4A28B8)
+val Deep = Color(0xFF2A1466)
+val Royal = Color(0xFF6A3DE8)
 val Violet = Color(0xFF8B3DFF)
 val Gold = Color(0xFFFFC83D)
 val GoldDark = Color(0xFFB8801A)
 val Electric = Color(0xFF2CC8FF)
 val Ink = Color(0xFFF6F1FF)
-val Dim = Color(0xFFA79BC9)
+val Dim = Color(0xFFDCD0FF)
 val Danger = Color(0xFFFF4D6D)
 val RARITY = listOf(Color(0xFF8FA3C8), Electric, Violet, Gold, Color(0xFFFF4DD8))
 val AVATARS = listOf(Ink, Color(0xFFBFF6FF), Color(0xFFFFE08A), Color(0xFFE2B8FF), Color(0xFFB8FFC9), Color(0xFFFFC0CB))
@@ -42,7 +44,10 @@ val AVATARS = listOf(Ink, Color(0xFFBFF6FF), Color(0xFFFFE08A), Color(0xFFE2B8FF
 fun hsv(h: Int, s: Float, v: Float) = Color.hsv((((h % 360) + 360) % 360).toFloat(), s, v)
 
 /** Apparence d'un pays : paysage selon son biome, couleurs de bâtiments selon son style d'architecture. */
-class Look(val v: Int) {
+class Look(val v: Int, private val shade: Float = 0f) {
+    /** Version ombrée, utilisée pour la face latérale des volumes. */
+    val side: Look by lazy { Look(v, 0.4f) }
+    private fun sh(c: Color) = androidx.compose.ui.graphics.lerp(c, Color(0xFF1A0F33), shade)
     val c = countryOf(v)
     private val b = when (c.biome) {
         's' -> longArrayOf(0xFFF08A3C, 0xFFFFD98A, 0xFFB5793A, 0xFFD9A441, 0xFF9C6B1E)
@@ -64,12 +69,17 @@ class Look(val v: Int) {
         'l' -> longArrayOf(0xFF6FB6E8, 0xFF2C4A6E); 'm' -> longArrayOf(0xFFA9753F, 0xFFC9A45A); 'o' -> longArrayOf(0xFFF7F4EC, 0xFFB8322A)
         else -> longArrayOf(0, 0xFFB5452E)
     }
-    val wall = if (c.style == 'd') hsv(v * 47, 0.5f, 0.95f) else Color(s[0])
-    val roof = Color(s[1])
+    val wall = sh(if (c.style == 'd') hsv(v * 47, 0.5f, 0.95f) else Color(s[0]))
+    val roof = sh(Color(s[1]))
     val wallDark = androidx.compose.ui.graphics.lerp(wall, Color.Black, 0.28f)
 }
 
 enum class Mood { IDLE, JUMP, DANCE, WIN, SAD, HIT }
+
+/** Temps continu en secondes, à lire dans le bloc de dessin : l'écran est redessiné sans être recomposé. */
+@Composable
+fun rememberTime(): androidx.compose.runtime.State<Float> =
+    produceState(0f) { val start = withFrameNanos { it }; while (true) withFrameNanos { value = (it - start) / 1e9f } }
 
 /** Temps continu en secondes, pour les animations dessinées. */
 @Composable
@@ -163,8 +173,10 @@ fun DrawScope.star(c: Offset, r: Float, color: Color) {
 fun DrawScope.symbol(id: Int, c: Offset, r: Float) {
     val goldBrush = Brush.linearGradient(listOf(Color(0xFFFFF2B0), Gold, GoldDark), Offset(c.x - r, c.y - r), Offset(c.x + r, c.y + r))
     when (id) {
-        0 -> { // pièce
+        0 -> { // pièce avec tranche
+            drawCircle(Color(0xFF8A5A0E), r * 0.92f, Offset(c.x, c.y + r * 0.14f)); drawCircle(GoldDark, r * 0.92f, Offset(c.x, c.y + r * 0.07f))
             drawCircle(GoldDark, r * 0.92f, c); drawCircle(goldBrush, r * 0.84f, c)
+            drawArc(Color.White.copy(alpha = 0.55f), 200f, 70f, false, Offset(c.x - r * 0.72f, c.y - r * 0.72f), Size(r * 1.44f, r * 1.44f), style = Stroke(r * 0.09f, cap = StrokeCap.Round))
             drawCircle(GoldDark, r * 0.6f, c, style = Stroke(r * 0.07f))
             drawCircle(GoldDark, r * 0.08f, Offset(c.x - r * 0.2f, c.y - r * 0.05f)); drawCircle(GoldDark, r * 0.08f, Offset(c.x + r * 0.2f, c.y - r * 0.05f))
             drawArc(GoldDark, 20f, 140f, false, Offset(c.x - r * 0.2f, c.y - r * 0.05f), Size(r * 0.4f, r * 0.3f), style = Stroke(r * 0.07f, cap = StrokeCap.Round))
@@ -250,7 +262,10 @@ private val StoneDark = Color(0xFF8E7F63)
 private val Wood = Color(0xFF7A4E2A)
 
 /** Une construction dans le style d'architecture du pays. `w`, `h` : emprise du corps du bâtiment. */
-fun DrawScope.house(k: Look, x: Float, base: Float, w: Float, h: Float, damaged: Boolean = false) {
+fun DrawScope.house(k: Look, x: Float, base: Float, w: Float, h: Float, damaged: Boolean = false, depth: Boolean = true) {
+    // Relief 2,5D : le même volume, décalé et ombré, forme la face latérale et l'épaisseur du toit.
+    if (depth) { translate(w * 0.15f, -w * 0.075f) { house(k.side, x, base, w, h, damaged, false) }
+        drawPath(poly(x + w / 2, base, x + w / 2 + w * 0.15f, base - w * 0.075f, x + w / 2 + w * 0.15f, base - h * 0.5f, x + w / 2, base - h * 0.5f), k.side.wall) }
     val wall = if (damaged) k.wallDark else k.wall
     val body = Brush.horizontalGradient(listOf(wall, k.wallDark), x - w / 2, x + w / 2)
     fun box(y: Float = base, hh: Float = h, ww: Float = w) = drawRect(body, Offset(x - ww / 2, y - hh), Size(ww, hh))
@@ -486,10 +501,18 @@ fun DrawScope.villageScene(village: Int, levels: List<Int>, damaged: List<Boolea
         if (biome == 's' || biome == 'j' || biome == 'p') for (i in 0 until 5) tree(biome, w * (0.08f + i * 0.21f + (village % 5) * 0.01f), horizon + h * 0.04f, h * 0.09f)
         drawRect(Brush.verticalGradient(listOf(k.ground, k.groundDark), horizon + h * 0.03f, h), Offset(0f, horizon + h * 0.03f), Size(w, h))
         drawPath(Path().apply { moveTo(w * 0.42f, h); quadraticTo(w * 0.5f, h * 0.8f, w * 0.46f, h * 0.7f); lineTo(w * 0.54f, h * 0.7f); quadraticTo(w * 0.6f, h * 0.8f, w * 0.62f, h); close() }, k.groundDark.copy(alpha = 0.5f))
-        for (i in listOf(4, 3, 7, 5, 0, 1, 2, 6)) {
-            val (x, base, u) = slot(i, size)
-            building(i, levels[i], damaged[i], k, x, base, u, t + i)
-        }
+        // Route pavée qui traverse le village, touffes d'herbe et fleurs.
+        val road = Path().apply { moveTo(-w * 0.05f, h * 0.8f); quadraticTo(w * 0.5f, h * 0.74f, w * 1.05f, h * 0.8f); lineTo(w * 1.05f, h * 0.86f); quadraticTo(w * 0.5f, h * 0.8f, -w * 0.05f, h * 0.86f); close() }
+        drawPath(road, androidx.compose.ui.graphics.lerp(k.groundDark, Color(0xFFE9D8B0), 0.45f))
+        for (i in 0 until 14) drawOval(Color.White.copy(alpha = 0.22f), Offset(w * (i / 14f) + w * 0.02f, h * (0.795f - 0.03f * sin(i / 14f * 3.14f)) + (i % 2) * h * 0.02f), Size(w * 0.035f, h * 0.008f))
+        repeat(16) { val gx = rnd.nextFloat() * w; val gy = h * (0.6f + rnd.nextFloat() * 0.38f); val gs = w * 0.012f
+            if (it % 4 == 0) drawCircle(hsv(it * 53, 0.6f, 1f), gs * 0.6f, Offset(gx, gy))
+            else for (j in -1..1) drawLine(androidx.compose.ui.graphics.lerp(k.ground, Color.White, 0.25f), Offset(gx + j * gs * 0.5f, gy), Offset(gx + j * gs, gy - gs * 1.4f), 2f) }
+        for (i in listOf(4, 3, 7, 5)) { val (x, base, u) = slot(i, size); building(i, levels[i], damaged[i], k, x, base, u, t + i) }
+        // Habitants qui se promènent.
+        for (i in 0 until 4) { val dir = if (i % 2 == 0) 1f else -1f; val f = ((t * 0.035f * (1f + i * 0.25f) + i * 0.31f) % 1.2f)
+            villager((if (dir > 0) f else 1.1f - f) * w - w * 0.05f, h * (0.805f + (i % 2) * 0.035f), w * 0.022f, hsv(k.v * 47 + i * 90, 0.65f, 0.9f), i, t * 7f + i, dir) }
+        for (i in listOf(0, 1, 2, 6)) { val (x, base, u) = slot(i, size); building(i, levels[i], damaged[i], k, x, base, u, t + i) }
         // Vie du décor : neige, poussière ou oiseaux.
         repeat(14) {
             val sx = rnd.nextFloat(); val sy = rnd.nextFloat(); val sp = 0.03f + rnd.nextFloat() * 0.05f
@@ -504,9 +527,9 @@ fun DrawScope.villageScene(village: Int, levels: List<Int>, damaged: List<Boolea
         if (strike >= 0) { // éclair d'attaque puis explosion
             val (x, base, u) = slot(strike, size)
             val hit = Offset(x, base - u * 0.5f)
-            if (strikeT < 0.35f) {
-                val p = Path().apply { moveTo(x + u * 0.5f, 0f); lineTo(x - u * 0.2f, hit.y * 0.45f); lineTo(x + u * 0.25f, hit.y * 0.55f); lineTo(hit.x, hit.y) }
-                drawPath(p, Electric, style = Stroke(10f, cap = StrokeCap.Round)); drawPath(p, Color.White, style = Stroke(4f, cap = StrokeCap.Round))
+            if (strikeT < 0.4f) { // le marteau s'abat sur la cible
+                val sw = (strikeT / 0.3f).coerceIn(0f, 1f)
+                rotate(-70f + sw * sw * 95f, Offset(hit.x + u * 0.9f, hit.y)) { symbol(2, Offset(hit.x + u * 0.25f, hit.y - u * 0.75f), u * 0.75f) }
             }
             val f = ((strikeT - 0.2f) / 0.8f).coerceIn(0f, 1f)
             if (f > 0f) {
@@ -516,6 +539,19 @@ fun DrawScope.villageScene(village: Int, levels: List<Int>, damaged: List<Boolea
             }
         }
     }
+}
+
+/** Petit habitant qui marche : jambes animées, vêtement aux couleurs du pays. */
+fun DrawScope.villager(x: Float, y: Float, s: Float, cloth: Color, tone: Int, phase: Float, dir: Float) {
+    val skin = listOf(Color(0xFF6B4226), Color(0xFFB47B4E), Color(0xFFE2B48A), Color(0xFF8D5A3B))[tone % 4]
+    drawOval(Color.Black.copy(alpha = 0.2f), Offset(x - s * 0.8f, y - s * 0.15f), Size(s * 1.6f, s * 0.4f))
+    val sw = sin(phase) * s * 0.6f
+    drawLine(Color(0xFF3A2A4A), Offset(x, y - s * 1.2f), Offset(x + sw, y), s * 0.4f, StrokeCap.Round)
+    drawLine(Color(0xFF3A2A4A), Offset(x, y - s * 1.2f), Offset(x - sw, y), s * 0.4f, StrokeCap.Round)
+    drawRoundRect(cloth, Offset(x - s * 0.6f, y - s * 2.7f), Size(s * 1.2f, s * 1.7f), CornerRadius(s * 0.5f))
+    drawLine(skin, Offset(x + dir * s * 0.3f, y - s * 2.3f), Offset(x + dir * s * 0.3f - sw * 0.7f, y - s * 1.4f), s * 0.3f, StrokeCap.Round)
+    drawCircle(skin, s * 0.62f, Offset(x, y - s * 3.2f))
+    drawCircle(Night, s * 0.1f, Offset(x + dir * s * 0.28f, y - s * 3.25f))
 }
 
 /** Illustration d'une carte, selon son album. */

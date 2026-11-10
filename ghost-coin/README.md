@@ -75,7 +75,7 @@ Appui long sur le profil, en haut à gauche de l'écran d'accueil.
 ## Ce qui n'est pas fait
 
 - Achats en argent réel (Google Play Billing), publicités récompensées et pass saisonnier : ils demandent un compte Play Console et une régie, absents ici. La boutique ne vend que des coffres contre des pièces du jeu.
-- Projet Unity : le jeu est en Kotlin natif.
+- Projet Unity et modèles 3D : le jeu est en Kotlin natif, avec des illustrations 2,5D dessinées par le code (volumes ombrés, pas de moteur 3D).
 - Défis entre amis, cosmétiques payants.
 - Un décor dessiné à la main par pays : les villages sont composés à partir du biome, du style et du monument de chaque pays. Les rattachements culturels et les coordonnées sont à faire relire avant publication.
 - Les triches de jeu (résultat imposé, ressources illimitées) n'existent que dans le bac à sable local, pas sur un compte en ligne.

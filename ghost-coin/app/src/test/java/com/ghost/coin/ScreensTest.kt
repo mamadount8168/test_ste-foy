@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -80,7 +81,7 @@ class ScreensTest {
     @Test fun buildFlowUpgradesABuilding() {
         launch(GameState(coins = 500_000))
         rule.onNodeWithText("Construire").performClick(); settle()
-        rule.onNodeWithText("Améliorer\n3000").performClick(); settle()
+        rule.onNodeWithTag("build-0").performClick(); settle()
         assertEquals(1, game.state.levels[0])
         assertEquals(500_000L - 3000, game.state.coins)
     }
@@ -91,7 +92,7 @@ class ScreensTest {
         assertEquals(Screen.ATTACK, game.screen)
         val t = game.state.target!!
         val b = t.levels.indexOfFirst { it > 0 }
-        rule.onNodeWithText("${BUILDINGS[b]}\nniveau ${t.levels[b]}").performClick()
+        rule.onNodeWithTag("target-$b").performClick()
         repeat(4) { settle(600) }
         assertEquals(null, game.state.target)
         assertTrue(game.state.coins > 20_000)
@@ -103,7 +104,7 @@ class ScreensTest {
         launch(GameState(raids = 1))
         rule.onNodeWithText("Raid").performClick(); settle()
         assertEquals(Screen.RAID, game.screen)
-        repeat(3) { rule.onAllNodes(androidx.compose.ui.test.hasText("Creuser"))[0].performClick(); settle() }
+        for (h in 0..2) { rule.onNodeWithTag("dig-$h").performClick(); settle() }
         assertEquals(null, game.state.target)
         assertEquals(1L, game.state.stats["raid"])
         rule.onNodeWithText("Continuer").performClick(); settle()
@@ -121,6 +122,10 @@ class ScreensTest {
         rule.runOnUiThread { game.screen = Screen.HOME; game.cinematic = 0 }; settle(3000)
         rule.onRoot().captureRoboImage("build/shots/CINEMATIC.png")
     }
+
+    /** Même écran sur un petit et un grand téléphone : rien ne doit déborder ni se chevaucher. */
+    @Test @Config(sdk = [34], qualifiers = "w320dp-h640dp-xhdpi") fun rendersHomeOnSmallPhone() { launch(rich); rule.onRoot().captureRoboImage("build/shots/HOME_small.png"); rule.onNodeWithText("SPIN").assertExists() }
+    @Test @Config(sdk = [34], qualifiers = "w412dp-h915dp-xxhdpi") fun rendersHomeOnLargePhone() { launch(rich); rule.onRoot().captureRoboImage("build/shots/HOME_large.png"); rule.onNodeWithText("SPIN").assertExists() }
 
     @Test fun rendersVillagesOfManyCountries() {
         val names = listOf("Sénégal", "Mali", "Égypte", "Maroc", "Kenya", "France", "Grèce", "Russie", "Norvège", "Mexique", "Brésil", "Chine", "Japon", "Inde", "Thaïlande", "Émirats arabes unis", "Mongolie", "Australie", "Fidji", "Pays-Bas")
