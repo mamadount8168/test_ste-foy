@@ -10,7 +10,8 @@ import kotlin.test.*
 class ServerTest {
     private val dir = Files.createTempDirectory("ghostcoin").toFile()
     private var now = 1_800_000_000_000L
-    private var server = GameServer(dir, 0) { now }.also { it.start() }
+    private val pw = "mot-de-passe-de-test"
+    private var server = GameServer(dir, 0, pw) { now }.also { it.start() }
     private val http = HttpClient.newHttpClient()
 
     @AfterTest fun stop() { server.stop(); dir.deleteRecursively() }
@@ -116,8 +117,69 @@ class ServerTest {
         val hit = post("/act", Req(type = "hit", i = 0), a.token).second
         assertEquals(1L, hit.events.first { it.type == "attackResult" }.m) // Bob avait 1 bouclier de départ
         server.stop()
-        server = GameServer(dir, 0) { now }.also { it.start() }
+        server = GameServer(dir, 0, pw) { now }.also { it.start() }
         bs = post("/board", token = b.token).second.state!!
         assertEquals(0, bs.shields); assertEquals("Alice", bs.log.first().who); assertEquals("attack", bs.log.first().kind)
+    }
+
+    private fun adminLogin() = post("/admin", Req(op = "login", password = pw)).second.token
+
+    @Test fun adminIsDisabledWithoutServerSidePassword() {
+        server.stop(); server = GameServer(dir, 0) { now }.also { it.start() }
+        assertEquals(403, post("/admin", Req(op = "login", password = "")).first)
+        assertEquals(403, post("/admin", Req(op = "dashboard")).first)
+    }
+
+    @Test fun playersCannotUseAdminAndWrongPasswordLocksOut() {
+        val me = register("Alice")
+        assertEquals(401, post("/admin", Req(op = "dashboard"), me.token).first)
+        assertEquals(401, post("/admin", Req(op = "cmd", to = me.state!!.id, cmd = AdminCmd("coins", n = 9_000_000)), me.token).first)
+        repeat(5) { assertEquals(403, post("/admin", Req(op = "login", password = "faux")).first) }
+        assertEquals(429, post("/admin", Req(op = "login", password = pw)).first) // même le bon mot de passe attend
+        now += 16 * 60_000
+        assertEquals(200, post("/admin", Req(op = "login", password = pw)).first)
+    }
+
+    @Test fun adminSessionExpiresAfterInactivity() {
+        val t = adminLogin()
+        assertEquals(200, post("/admin", Req(op = "dashboard"), t).first)
+        now += 16 * 60_000
+        assertEquals(401, post("/admin", Req(op = "dashboard"), t).first)
+    }
+
+    @Test fun adminEditsPlayerWithAuditAndUndo() {
+        val me = register("Alice"); val t = adminLogin()
+        val r = post("/admin", Req(op = "cmd", to = me.state!!.id, cmd = AdminCmd("coins", n = 5_000_000, s = "add")), t).second
+        assertEquals(me.state!!.coins + 5_000_000, r.state!!.coins)
+        assertEquals(74, post("/admin", Req(op = "cmd", to = me.state!!.id, cmd = AdminCmd("country", 74)), t).second.state!!.village)
+        assertEquals(0, post("/admin", Req(op = "undo"), t).second.state!!.village)
+        assertEquals(me.state!!.coins, post("/admin", Req(op = "undo"), t).second.state!!.coins)
+        val log = post("/admin", Req(op = "logs", s = "audit"), t).second.lines
+        assertTrue(log.any { "commande coins" in it } && log.any { "annulation" in it } && log.any { "connexion administrateur" in it })
+        assertTrue(dir.resolve("audit.log").readText().contains("commande country"))
+        assertTrue(post("/admin", Req(op = "export"), t).second.lines.size > 10)
+    }
+
+    @Test fun testPlayersAreFlaggedCanSimulateAttacksAndAreRemovable() {
+        val me = register("Alice"); val t = adminLogin()
+        val made = post("/admin", Req(op = "mktest", n = 3), t).second
+        val tests = made.board.filter { it.test }
+        assertEquals(3, tests.size); assertTrue(tests.all { it.name.startsWith("TEST-") }); assertEquals("3", made.stats["Comptes de test"]); assertEquals("1", made.stats["Joueurs"])
+        assertEquals(400, post("/admin", Req(op = "simAttack", to = tests[0].id, s = me.state!!.id), t).first) // un vrai joueur ne sert pas d'attaquant simulé
+        val hit = post("/admin", Req(op = "simAttack", to = me.state!!.id, s = tests[0].id, i = 0), t).second.state!!
+        assertEquals(0, hit.shields); assertEquals(tests[0].name, hit.log.first().who)
+        assertEquals(0, post("/admin", Req(op = "rmtests"), t).second.board.count { it.test })
+    }
+
+    @Test fun liveEventOverridesCalendarWhileActive() {
+        val me = register("Alice"); val t = adminLogin()
+        assertNull(post("/act", Req(type = "sync"), me.token).second.live)
+        assertEquals(400, post("/admin", Req(op = "eventSave", event = LiveEvent(name = "", start = now, end = now + 10)), t).first)
+        val ev = post("/admin", Req(op = "eventSave", event = LiveEvent(name = "Fête de Dakar", text = "Pièces triplées", coins = 300, start = now - 1, end = now + 3_600_000)), t).second.liveEvents.single()
+        tick()
+        assertEquals("Fête de Dakar", post("/act", Req(type = "sync"), me.token).second.live!!.name)
+        post("/admin", Req(op = "eventStop", s = ev.id), t)
+        tick()
+        assertNull(post("/act", Req(type = "sync"), me.token).second.live)
     }
 }

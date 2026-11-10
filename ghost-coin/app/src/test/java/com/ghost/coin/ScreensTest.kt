@@ -21,6 +21,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 
 /** Rend chaque écran avec un état de partie avancé, l'enregistre en PNG et vérifie les parcours principaux. */
 @RunWith(RobolectricTestRunner::class)
@@ -105,5 +108,74 @@ class ScreensTest {
         assertEquals(1L, game.state.stats["raid"])
         rule.onNodeWithText("Continuer").performClick(); settle()
         assertEquals(Screen.HOME, game.screen)
+    }
+
+    @Test fun rendersWorldMapAdminAndCountryVillages() {
+        launch(rich.copy(village = 57, levels = listOf(3, 2, 1, 2, 0, 2, 1, 3)))
+        rule.runOnUiThread { game.screen = Screen.MAP }; settle(2500)
+        rule.onRoot().captureRoboImage("build/shots/MAP.png")
+        rule.runOnUiThread { game.screen = Screen.ADMIN }; settle()
+        rule.onRoot().captureRoboImage("build/shots/ADMIN_LOGIN.png")
+        rule.onNodeWithText("Ouvrir le bac à sable").performClick(); settle()
+        rule.onRoot().captureRoboImage("build/shots/SANDBOX.png")
+        rule.runOnUiThread { game.screen = Screen.HOME; game.cinematic = 0 }; settle(3000)
+        rule.onRoot().captureRoboImage("build/shots/CINEMATIC.png")
+    }
+
+    @Test fun rendersVillagesOfManyCountries() {
+        val names = listOf("Sénégal", "Mali", "Égypte", "Maroc", "Kenya", "France", "Grèce", "Russie", "Norvège", "Mexique", "Brésil", "Chine", "Japon", "Inde", "Thaïlande", "Émirats arabes unis", "Mongolie", "Australie", "Fidji", "Pays-Bas")
+        rule.setContent {
+            androidx.compose.foundation.layout.Column {
+                names.chunked(4).forEach { row ->
+                    androidx.compose.foundation.layout.Row {
+                        row.forEach { n ->
+                            val i = COUNTRIES.indexOfFirst { it.name == n }
+                            androidx.compose.foundation.Canvas(androidx.compose.ui.Modifier.weight(1f).height(150.dp).padding(1.dp)) { villageScene(i, List(8) { 3 }, List(8) { false }, 1.5f) }
+                        }
+                    }
+                }
+            }
+        }
+        rule.onRoot().captureRoboImage("build/shots/COUNTRIES.png")
+    }
+
+    @Test fun sandboxIsIsolatedFromTheRealGameAndHonoursCheats() {
+        launch(GameState(coins = 4_321))
+        rule.runOnUiThread { game.cheats.force = Sym.GHOST.ordinal; game.enterSandbox(true) }; settle()
+        rule.runOnUiThread { game.boxCmd(AdminCmd("coins", n = 9_000_000, s = "set")); game.boxCmd(AdminCmd("country", COUNTRIES.indexOfFirst { it.name == "Japon" })) }; settle()
+        assertEquals("Japon", villageName(game.state.village)); assertEquals(9_000_000L, game.state.coins)
+        rule.onNodeWithText("SPIN").performClick(); repeat(6) { settle(700) }
+        assertEquals(List(3) { Sym.GHOST.ordinal }, game.reels) // résultat imposé
+        rule.runOnUiThread { game.saveScenario("japon"); game.boxCmd(AdminCmd("reset")); game.loadScenario("japon") }; settle()
+        assertEquals("Japon", villageName(game.box.state.village))
+        rule.runOnUiThread { game.cheats.netLoss = true }; rule.onNodeWithText("SPIN").performClick(); settle()
+        assertTrue(game.toast!!.contains("réseau"))
+        rule.runOnUiThread { game.cheats.netLoss = false; game.enterSandbox(false) }; settle()
+        // La vraie partie n'a pas bougé.
+        assertEquals(4_321L, game.state.coins); assertEquals(0, game.state.village)
+        assertEquals(4_321L, JSON.decodeFromString<GameState>(File(ctx.filesDir, "save.json").readText()).coins)
+    }
+
+    @Test fun adminPanelDrivesARealServer() {
+        val dir = java.nio.file.Files.createTempDirectory("gc").toFile()
+        val server = com.ghost.coin.server.GameServer(dir, 0, "mot-de-passe-de-test").also { it.start() }
+        try {
+            launch(GameState())
+            val url = "http://localhost:${server.port}"
+            fun wait(cond: () -> Boolean) { repeat(40) { if (!cond()) settle(300) }; assertTrue(cond()) }
+            rule.runOnUiThread { game.adminLogin(url, "faux") }; wait { game.toast != null }
+            assertEquals("", game.adminToken)
+            rule.runOnUiThread { game.adminLogin(url, "mot-de-passe-de-test") }; wait { game.adminStats.isNotEmpty() }
+            rule.runOnUiThread { game.adminDo(Req(op = "mktest", n = 3)) }; wait { game.adminRows.size == 3 }
+            assertTrue(game.adminRows.all { it.test })
+            val id = game.adminRows[0].id
+            rule.runOnUiThread { game.adminDo(Req(op = "cmd", to = id, cmd = AdminCmd("country", 120))) }; wait { game.adminPlayer?.village == 120 }
+            rule.runOnUiThread { game.screen = Screen.ADMIN }; settle()
+            rule.onRoot().captureRoboImage("build/shots/ADMIN_DASHBOARD.png")
+            rule.onNodeWithText("Joueurs").performClick(); settle(); settle()
+            rule.onRoot().captureRoboImage("build/shots/ADMIN_PLAYERS.png")
+            rule.runOnUiThread { game.adminLogout() }; settle()
+            assertEquals("", game.adminToken)
+        } finally { server.stop(); dir.deleteRecursively() }
     }
 }

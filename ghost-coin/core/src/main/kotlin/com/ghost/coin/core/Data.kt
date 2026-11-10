@@ -6,32 +6,9 @@ import kotlin.math.pow
 /** Symboles de la machine. L'ordre est celui de la bande de chaque rouleau. */
 enum class Sym { COIN, BAG, HAMMER, SHIELD, GHOST, ATTACK, RAID, STAR }
 
-/** Un monde : `hue` (0..360) pilote la palette, `deco` les particules d'ambiance, `roof` le style des toits. */
-class Village(val name: String, val hue: Int, val deco: Int, val roof: Int)
-
-val VILLAGES = listOf(
-    Village("Village hanté", 265, 0, 0), Village("Village des citrouilles", 28, 4, 0),
-    Village("Royaume des sorciers", 285, 0, 1), Village("Île des fantômes", 190, 3, 2),
-    Village("Château des ténèbres", 250, 2, 0), Village("Village des dragons", 5, 2, 1),
-    Village("Royaume de glace", 205, 1, 2), Village("Île aux trésors", 45, 3, 0),
-    Village("Ville des squelettes", 95, 0, 1), Village("Royaume céleste", 225, 0, 2),
-    Village("Marais des feux follets", 150, 3, 0), Village("Forêt des murmures", 125, 4, 1),
-    Village("Cité des lanternes", 15, 2, 2), Village("Désert des mirages", 38, 4, 0),
-    Village("Récif des sirènes", 175, 3, 1), Village("Vallée des golems", 60, 4, 2),
-    Village("Volcan des âmes", 355, 2, 0), Village("Jardin des lucioles", 80, 0, 1),
-    Village("Port des naufragés", 215, 3, 2), Village("Cimetière des géants", 240, 0, 0),
-    Village("Cité des horloges", 32, 4, 1), Village("Toundra des spectres", 195, 1, 2),
-    Village("Grotte de cristal", 300, 0, 0), Village("Bazar des ombres", 320, 2, 1),
-    Village("Monastère des nuages", 210, 1, 2), Village("Jungle des masques", 140, 4, 0),
-    Village("Palais des miroirs", 185, 0, 1), Village("Forge des étoiles", 20, 2, 2),
-    Village("Abysses lumineuses", 235, 3, 0), Village("Trône du Roi Fantôme", 275, 0, 1),
-)
-
-fun villageOf(v: Int) = VILLAGES[v % VILLAGES.size]
-fun villageName(v: Int) = villageOf(v).name + if (v >= VILLAGES.size) " ${"I".repeat(v / VILLAGES.size + 1)}" else ""
-
+/** Les 8 emplacements d'un village ; leur apparence dépend du pays (voir Country). */
 val BUILDINGS = listOf(
-    "Maison fantôme", "Château", "Tour magique", "Banque", "Mine d'or", "Laboratoire", "Temple", "Portail magique",
+    "Porte du village", "Maisons", "Marché", "Monument", "Édifice historique", "Jardin", "Atelier d'artisans", "Palais",
 )
 
 val RARITIES = listOf("Commune", "Rare", "Épique", "Légendaire", "Mythique")
@@ -75,9 +52,12 @@ val QUESTS = listOf(
     Quest("a:spin", "Vétéran : 1 000 tours lancés", "spin", 1000, spins = 50),
     Quest("a:attack", "Foudre de guerre : 50 attaques", "attack", 50, spins = 40),
     Quest("a:raid", "Pilleur : 25 raids", "raid", 25, units = 400),
-    Quest("a:v5", "Explorateur : atteindre le monde 5", "village", 4, spins = 30),
-    Quest("a:v15", "Conquérant : atteindre le monde 15", "village", 14, spins = 80),
-    Quest("a:v30", "Légende : atteindre le monde 30", "village", 29, spins = 200),
+    Quest("a:v10", "Voyageur : terminer 10 pays", "village", 10, spins = 40),
+    Quest("a:af", "Terminer l'Afrique", "village", 54, spins = 150),
+    Quest("a:eu", "Terminer l'Europe", "village", 100, spins = 200),
+    Quest("a:am", "Terminer l'Amérique", "village", 135, spins = 250),
+    Quest("a:as", "Terminer l'Asie", "village", 182, spins = 300),
+    Quest("a:oc", "Tour du monde : terminer l'Océanie", "village", 196, spins = 500),
     Quest("a:c24", "Collectionneur : 24 cartes différentes", "cards", 24, chest = 2),
     Quest("a:c48", "Archiviste : toutes les cartes", "cards", 48, spins = 300),
 )
@@ -118,10 +98,10 @@ object Rules {
     val SELL = listOf(1, 3, 8, 25, 80)
 
     /** Valeur de référence d'un monde : toutes les récompenses et tous les prix en découlent. */
-    fun unit(v: Int): Long = (500.0 * 1.2.pow(v)).toLong() / 10 * 10
+    fun unit(v: Int): Long = (500.0 * 1.05.pow(minOf(v, 400))).toLong() / 10 * 10
 
     /** Prix pour passer le bâtiment `b` du niveau `l` au niveau `l + 1`. */
-    fun cost(v: Int, b: Int, l: Int): Long = unit(v) * (6 + 3 * b) * (l + 1) * (100 + 25 * v) / 100
+    fun cost(v: Int, b: Int, l: Int): Long = unit(v) * (6 + 3 * b) * (l + 1) * (100 + 4 * v) / 100
 
     fun day(now: Long) = now / DAY
     fun event(now: Long) = EVENTS[((day(now) + 3) % 7).toInt()] // le jour 0 (1er janvier 1970) était un jeudi
@@ -177,6 +157,8 @@ data class GameState(
     val raidStolen: Long = 0,
     val log: List<LogEntry> = emptyList(),
     val seq: Long = 0,
+    /** Compte de test créé par Ghost Admin (toujours affiché comme tel). */
+    val test: Boolean = false,
 ) {
     fun progress(q: Quest): Int = when {
         q.key == "village" -> village

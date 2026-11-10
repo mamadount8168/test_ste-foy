@@ -51,9 +51,32 @@ keyAlias=ghostcoin
 keyPassword=…
 ```
 
+## Tour du monde
+
+196 pays dans l'ordre Afrique (54), Europe (46), Amérique (35), Asie (47), Océanie (14), en commençant par le Sénégal. Les données sont dans `core/.../World.kt`, une ligne par pays :
+
+```
+code ISO | nom | latitude | longitude | biome | style | monument | lieu emblématique
+```
+
+Ajouter un pays revient à ajouter une ligne. Le biome choisit le paysage (8 possibles), le style l'architecture (14), le monument sa silhouette (26 formes). Chaque fin de continent donne une récompense et déclenche une cinématique.
+
+## Ghost Admin
+
+Appui long sur le profil, en haut à gauche de l'écran d'accueil.
+
+- Le mot de passe se définit sur le serveur, dans la variable d'environnement `ADMIN_PASSWORD` (12 caractères minimum). Sans elle, l'administration est désactivée. Il n'est ni dans le dépôt ni dans l'application.
+- Chaque commande est vérifiée par le serveur : session administrateur distincte des sessions de joueurs, expirée après 15 minutes d'inactivité, 5 essais de mot de passe par quart d'heure et par adresse IP.
+- Toutes les actions sont écrites dans `audit.log` (dossier de données). La dernière modification d'un joueur peut être annulée.
+- Les comptes de test portent le préfixe `TEST-` et l'indicateur `test` ; personne ne peut s'y connecter.
+
+**GHOST SANDBOX** est une partie d'essai enregistrée dans un fichier séparé (`sandbox.json`) : elle ne touche ni la partie solo ni le serveur. Dans l'APK de test (debug) elle s'ouvre sans serveur ; dans l'APK publié (release) il faut une session administrateur.
+
 ## Ce qui n'est pas fait
 
 - Achats en argent réel (Google Play Billing), publicités récompensées et pass saisonnier : ils demandent un compte Play Console et une régie, absents ici. La boutique ne vend que des coffres contre des pièces du jeu.
 - Projet Unity : le jeu est en Kotlin natif.
 - Défis entre amis, cosmétiques payants.
+- Un décor dessiné à la main par pays : les villages sont composés à partir du biome, du style et du monument de chaque pays. Les rattachements culturels et les coordonnées sont à faire relire avant publication.
+- Les triches de jeu (résultat imposé, ressources illimitées) n'existent que dans le bac à sable local, pas sur un compte en ligne.
 - Le serveur stocke ses données dans des fichiers : suffisant pour un test, à remplacer par une base de données avant une large audience.

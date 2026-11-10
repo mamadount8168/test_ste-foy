@@ -22,6 +22,7 @@ data class Account(
     val giftDay: Map<String, Long> = emptyMap(),
     val cardsDay: Long = -1, val cardsSent: Int = 0,
     val lastHitAt: Long = 0,
+    val lastSeen: Long = 0,
 )
 
 class Http(val code: Int, message: String) : Exception(message)
@@ -30,13 +31,27 @@ class Http(val code: Int, message: String) : Exception(message)
  * Serveur autoritaire de Ghost Coin. L'état de chaque joueur vit ici ; le téléphone n'envoie que des
  * intentions (« je lance », « je construis le bâtiment 3 ») et reçoit le résultat calculé par le moteur.
  */
-class GameServer(private val dir: File, port: Int, private val clock: () -> Long = System::currentTimeMillis) {
+class GameServer(private val dir: File, port: Int, private val adminPassword: String = "", private val clock: () -> Long = System::currentTimeMillis) {
     private val secure = SecureRandom()
     private val rng: Random = secure.asKotlinRandom()
     private val accounts = HashMap<String, Account>()
     private val byToken = HashMap<String, String>()
     private val hits = HashMap<String, ArrayDeque<Long>>()
     private val http = HttpServer.create(InetSocketAddress(port), 0)
+
+    // Ghost Admin : sessions séparées de celles des joueurs, journaux en mémoire, événements programmés.
+    private val started = clock()
+    private val adminSessions = HashMap<String, Long>()
+    private val adminFails = HashMap<String, ArrayDeque<Long>>()
+    private val requests = ArrayDeque<String>()
+    private val errors = ArrayDeque<String>()
+    private val audit = ArrayDeque<String>()
+    private val undo = ArrayDeque<Account>()
+    private var liveEvents = listOf<LiveEvent>()
+    private var requestCount = 0L
+    private var errorCount = 0L
+    private var granted = 0L
+    private var lastSave = 0L
     val port: Int get() = http.address.port
 
     init {
@@ -44,6 +59,7 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
         dir.listFiles { f -> f.name.endsWith(".json") }?.forEach { f ->
             runCatching { JSON.decodeFromString<Account>(f.readText()) }.onSuccess { accounts[it.id] = it; byToken[it.tokenHash] = it.id }
         }
+        runCatching { liveEvents = JSON.decodeFromString(File(dir, "events.json").readText()) }
         http.createContext("/") { ex -> handle(ex) }
         http.executor = Executors.newFixedThreadPool(8)
     }
@@ -59,7 +75,7 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
     }
 
     private fun save(a: Account) {
-        accounts[a.id] = a
+        accounts[a.id] = a; lastSave = clock()
         val tmp = File(dir, "${a.id}.tmp")
         tmp.writeText(JSON.encodeToString(Account.serializer(), a))
         Files.move(tmp.toPath(), File(dir, "${a.id}.json").toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
@@ -74,7 +90,8 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
         q.addLast(now)
     }
 
-    private fun row(a: Account) = Row(a.id, a.state.name, a.state.avatar, a.state.village, a.state.stars)
+    private fun row(a: Account) = Row(a.id, a.state.name, a.state.avatar, a.state.village, a.state.stars, a.state.coins, a.state.test)
+    private fun liveNow(now: Long) = liveEvents.firstOrNull { it.active(now) }
     private fun friendsOf(a: Account) = (a.friends.mapNotNull { accounts[it] } + a).map(::row).sortedByDescending { it.stars }
 
     private inner class ServerWorld(val selfId: String) : World {
@@ -97,15 +114,133 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
             return blocked
         }
 
+        override fun event(now: Long) = liveNow(now)?.toDay() ?: Rules.event(now)
+
         override fun raid(self: GameState, target: Target, amount: Long, now: Long) {
             val a = real(target.id) ?: return
             save(a.copy(state = Engine.sufferRaid(a.state, self.name, selfId, amount, now).first, lastHitAt = now))
         }
     }
 
+    private fun keep(q: ArrayDeque<String>, line: String) { q.addLast(line); while (q.size > 300) q.removeFirst() }
+
+    private fun audit(now: Long, what: String) {
+        val line = "${java.time.Instant.ofEpochMilli(now)} $what"
+        keep(audit, line)
+        runCatching { File(dir, "audit.log").appendText(line + "\n") }
+    }
+
+    /**
+     * Ghost Admin. Le mot de passe vient de la variable d'environnement ADMIN_PASSWORD du serveur : il n'existe
+     * ni dans le dépôt ni dans l'application. Chaque commande exige une session administrateur valide,
+     * distincte des sessions de joueurs, et laisse une trace dans le journal d'audit.
+     */
+    private fun admin(token: String, ip: String, req: Req, now: Long): Reply {
+        if (adminPassword.length < 12) throw Http(403, "Administration désactivée : définissez ADMIN_PASSWORD (12 caractères minimum) sur le serveur")
+        if (req.op == "login") {
+            val fails = adminFails.getOrPut(ip) { ArrayDeque() }
+            while (fails.isNotEmpty() && now - fails.first() > 900_000) fails.removeFirst()
+            if (fails.size >= 5) throw Http(429, "Trop de tentatives : réessayez dans 15 minutes")
+            if (!MessageDigest.isEqual(sha(req.password).toByteArray(), sha(adminPassword).toByteArray())) {
+                fails.addLast(now); audit(now, "ÉCHEC de connexion administrateur depuis $ip")
+                throw Http(403, "Mot de passe administrateur incorrect")
+            }
+            val t = secret(32)
+            adminSessions[sha(t)] = now; audit(now, "connexion administrateur depuis $ip")
+            return Reply(token = t)
+        }
+        val key = sha(token)
+        val last = adminSessions[key] ?: throw Http(401, "Session administrateur invalide")
+        if (now - last > 900_000) { adminSessions.remove(key); throw Http(401, "Session administrateur expirée après 15 minutes d'inactivité") }
+        adminSessions[key] = now
+        fun player(id: String = req.to) = accounts[id.trim().uppercase()] ?: throw Http(404, "Joueur introuvable")
+        fun saveEvents() = File(dir, "events.json").writeText(JSON.encodeToString(kotlinx.serialization.builtins.ListSerializer(LiveEvent.serializer()), liveEvents))
+        fun dashboard(): Map<String, String> {
+            val real = accounts.values.filter { !it.state.test }
+            val rt = Runtime.getRuntime()
+            return linkedMapOf(
+                "Joueurs" to "${real.size}",
+                "Comptes de test" to "${accounts.size - real.size}",
+                "Connectés (5 min)" to "${real.count { now - it.lastSeen < 300_000 }}",
+                "Pays débloqués" to "${real.sumOf { it.state.village + 1 }}",
+                "Villages terminés" to "${real.sumOf { it.state.village }}",
+                "Pièces distribuées (admin)" to "$granted",
+                "Requêtes servies" to "$requestCount",
+                "Erreurs" to "$errorCount",
+                "Serveur en ligne depuis" to "${(now - started) / 60_000} min",
+                "Mémoire utilisée" to "${(rt.totalMemory() - rt.freeMemory()) / 1_048_576} Mo",
+                "Dernière sauvegarde" to if (lastSave == 0L) "aucune depuis le démarrage" else "il y a ${(now - lastSave) / 1000} s",
+                "Événement actif" to (liveNow(now)?.name ?: "${Rules.event(now).name} (calendrier)"),
+            )
+        }
+        when (req.op) {
+            "logout" -> { adminSessions.remove(key); audit(now, "déconnexion administrateur"); return Reply() }
+            "dashboard" -> return Reply(stats = dashboard(), liveEvents = liveEvents)
+            "players" -> return Reply(board = accounts.values.sortedByDescending { it.lastSeen }.take(200).map(::row))
+            "player" -> return Reply(state = player().state)
+            "cmd" -> {
+                val a = player()
+                val c = req.cmd ?: throw Http(400, "Commande manquante")
+                val s = Admin.apply(a.state, c).let { it.copy(seq = it.seq + 1) }
+                undo.addLast(a); while (undo.size > 50) undo.removeFirst()
+                if (c.type == "coins") granted += maxOf(0, s.coins - a.state.coins)
+                save(a.copy(state = s)); audit(now, "commande ${c.type} i=${c.i} n=${c.n} ${c.s} sur ${a.id} (${a.state.name})")
+                return Reply(state = s)
+            }
+            "undo" -> {
+                val prev = undo.removeLastOrNull() ?: throw Http(400, "Rien à annuler")
+                val seq = (accounts[prev.id]?.state?.seq ?: prev.state.seq) + 1
+                save(prev.copy(state = prev.state.copy(seq = seq))); audit(now, "annulation de la dernière commande sur ${prev.id}")
+                return Reply(state = accounts[prev.id]!!.state)
+            }
+            "mktest" -> {
+                repeat(req.n.toInt().coerceIn(1, 20)) {
+                    val id = newId()
+                    val v = rng.nextInt(0, 60)
+                    // Jeton aléatoire jamais communiqué : personne ne peut se connecter à un compte de test.
+                    save(Account(id, sha(secret(32)), sha(secret(10)), GameState(
+                        id = id, name = "TEST-${id.take(4)}", avatar = rng.nextInt(6), test = true, village = v, stars = v * 24,
+                        levels = List(8) { rng.nextInt(1, Rules.MAX_LEVEL + 1) }, coins = Rules.unit(v) * rng.nextInt(50, 800),
+                        shields = rng.nextInt(0, Rules.MAX_SHIELDS + 1), cards = CARDS.indices.filter { rng.nextInt(3) == 0 }.associateWith { rng.nextInt(1, 4) },
+                    )))
+                }
+                audit(now, "création de ${req.n.toInt().coerceIn(1, 20)} compte(s) de test")
+            }
+            "rmtests" -> {
+                val gone = accounts.values.filter { it.state.test }
+                gone.forEach { accounts.remove(it.id); byToken.remove(it.tokenHash); File(dir, "${it.id}.json").delete() }
+                audit(now, "suppression de ${gone.size} compte(s) de test")
+            }
+            "simAttack", "simRaid" -> {
+                val from = player(req.s).takeIf { it.state.test } ?: throw Http(400, "L'attaquant doit être un compte de test")
+                val a = player()
+                undo.addLast(a)
+                val s = if (req.op == "simAttack") Engine.sufferAttack(a.state, from.state.name, from.id, req.i.coerceIn(0, 7), now).first
+                else Engine.sufferRaid(a.state, from.state.name, from.id, maxOf(0, req.n), now).first
+                save(a.copy(state = s.copy(seq = s.seq + 1))); audit(now, "${req.op} de ${from.id} sur ${a.id}")
+                return Reply(state = s)
+            }
+            "eventSave" -> {
+                val e = req.event ?: throw Http(400, "Événement manquant")
+                if (e.name.isBlank() || e.end <= e.start) throw Http(400, "Nom et période valides requis")
+                val id = e.id.ifEmpty { secret(4) }
+                liveEvents = liveEvents.filter { it.id != id } + e.copy(id = id, name = e.name.take(40), text = e.text.take(120))
+                saveEvents(); audit(now, "événement enregistré : ${e.name} ($id)")
+            }
+            "eventStop" -> { liveEvents = liveEvents.map { if (it.id == req.s) it.copy(enabled = false) else it }; saveEvents(); audit(now, "événement arrêté : ${req.s}") }
+            "eventDelete" -> { liveEvents = liveEvents.filter { it.id != req.s }; saveEvents(); audit(now, "événement supprimé : ${req.s}") }
+            "logs" -> return Reply(lines = (when (req.s) { "errors" -> errors; "audit" -> audit; else -> requests }).reversed())
+            "export" -> return Reply(lines = listOf("# Ghost Coin — diagnostic du ${java.time.Instant.ofEpochMilli(now)}") + dashboard().map { "${it.key} : ${it.value}" } +
+                listOf("", "# Événements") + liveEvents.map { it.toString() } + listOf("", "# Audit") + audit + listOf("", "# Erreurs") + errors + listOf("", "# Requêtes") + requests)
+            else -> throw Http(400, "Opération inconnue")
+        }
+        return Reply(stats = dashboard(), liveEvents = liveEvents, board = accounts.values.sortedByDescending { it.lastSeen }.take(200).map(::row))
+    }
+
     @Synchronized
     private fun route(path: String, token: String, ip: String, req: Req): Reply {
         val now = clock()
+        if (path == "/admin") return admin(token, ip, req, now)
         if (path == "/register") {
             limit("reg:$ip", 10, 3_600_000)
             val t = secret(32); val rec = secret(10); val id = newId()
@@ -121,7 +256,7 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
             save(a.copy(tokenHash = sha(t))); byToken[sha(t)] = a.id
             return Reply(state = a.state, token = t)
         }
-        val me = byToken[sha(token)]?.let { accounts[it] } ?: throw Http(401, "Session invalide")
+        val me = (byToken[sha(token)]?.let { accounts[it] } ?: throw Http(401, "Session invalide")).copy(lastSeen = now).also { accounts[it.id] = it }
         limit("act:${me.id}", 12, 1_000)
         limit("min:${me.id}", 300, 60_000)
         when (path) {
@@ -130,12 +265,12 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
                 val r = try { Engine.apply(me.state, Action(req.type, req.i, req.s), now, rng, ServerWorld(me.id)) }
                 catch (e: Refused) { return Reply(false, e.message ?: "Refusé", me.state) }
                 save(accounts[me.id]!!.copy(state = r.state))
-                return Reply(state = r.state, events = r.events)
+                return Reply(state = r.state, events = r.events, live = liveNow(now))
             }
             "/board" -> return Reply(
                 state = me.state,
                 board = accounts.values.sortedByDescending { it.state.stars }.take(50).map(::row),
-                friends = friendsOf(me),
+                friends = friendsOf(me), live = liveNow(now),
             )
             "/friend" -> {
                 val f = accounts[req.to.trim().uppercase()] ?: throw Http(404, "Code ami introuvable")
@@ -173,6 +308,7 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
 
     private fun handle(ex: HttpExchange) {
         var code = 200
+        val t0 = System.nanoTime()
         val reply = try {
             if (ex.requestURI.path == "/health") Reply()
             else {
@@ -187,6 +323,12 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
         } catch (e: Http) { code = e.code; Reply(false, e.message ?: "Erreur") }
         catch (e: Refused) { code = 400; Reply(false, e.message ?: "Refusé") }
         catch (e: Exception) { code = 400; Reply(false, "Requête invalide") }
+        synchronized(this) {
+            requestCount++
+            val line = "${java.time.Instant.ofEpochMilli(clock())} ${ex.requestURI.path} $code ${(System.nanoTime() - t0) / 1_000_000} ms"
+            if (ex.requestURI.path != "/health") keep(requests, line)
+            if (code >= 400) { errorCount++; keep(errors, "$line — ${reply.error}") }
+        }
         val out = JSON.encodeToString(Reply.serializer(), reply).toByteArray()
         ex.responseHeaders.add("Content-Type", "application/json; charset=utf-8")
         ex.sendResponseHeaders(code, out.size.toLong())
@@ -196,7 +338,7 @@ class GameServer(private val dir: File, port: Int, private val clock: () -> Long
 
 fun main() {
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
-    val server = GameServer(File(System.getenv("DATA_DIR") ?: "data"), port)
+    val server = GameServer(File(System.getenv("DATA_DIR") ?: "data"), port, System.getenv("ADMIN_PASSWORD") ?: "")
     server.start()
     println("Ghost Coin : serveur démarré sur le port ${server.port}")
 }

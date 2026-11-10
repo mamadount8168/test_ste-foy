@@ -44,8 +44,8 @@ fun BuildScreen(game: Game) = Sheet(game, "Construire") {
     val s = game.state
     val t = frameTime()
     Canvas(Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(20.dp))) { villageScene(s.village, s.levels, s.damaged, t) }
-    T("${villageName(s.village)} — terminez les 8 bâtiments pour ouvrir le monde suivant." + if (s.voucher) " Bon −50 % actif." else "", 12, Dim)
-    val pal = remember(s.village) { Palette(s.village) }
+    T("${countryOf(s.village).flag} ${villageName(s.village)} — terminez les 8 emplacements pour ouvrir le pays suivant." + if (s.voucher) " Bon −50 % actif." else "", 12, Dim)
+    val pal = remember(s.village) { Look(s.village) }
     for (b in 0 until 8) {
         val lvl = s.levels[b]
         val repair = s.damaged[b]
@@ -82,7 +82,7 @@ fun AttackScreen(game: Game) {
     val anim = remember { Animatable(0f) }
     val t = frameTime()
     Sheet(game, "Attaque") {
-        T("Village de ${target.name} · ${villageName(target.village)}", 14, Ink, FontWeight.Bold)
+        T("Village de ${target.name} · ${countryOf(target.village).flag} ${villageName(target.village)}", 14, Ink, FontWeight.Bold)
         Canvas(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(20.dp)).border(1.5.dp, Electric, RoundedCornerShape(20.dp))) {
             val broken = List(8) { it == struck && !blocked && anim.value > 0.4f }
             villageScene(target.village, target.levels, broken, t, struck, anim.value)
@@ -251,7 +251,7 @@ fun ShopScreen(game: Game) = Sheet(game, "Boutique") {
             Canvas(Modifier.size(64.dp)) { chest(Offset(size.width / 2, size.height * 0.55f), size.width * 0.42f, 0) }
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 T("Coffre gratuit", 16, Ink, FontWeight.Bold)
-                T("${Rules.event(game.now).freeCards} cartes, toutes les 4 heures", 12, Dim)
+                T("${game.event.freeCards} cartes, toutes les 4 heures", 12, Dim)
             }
             GButton(game, if (wait <= 0) "Ouvrir" else "%d:%02d:%02d".format(wait / 3_600_000, wait / 60_000 % 60, wait / 1000 % 60), Modifier.width(112.dp), enabled = wait <= 0) { game.act("freeChest") }
         }
@@ -282,7 +282,7 @@ private fun rewardText(spins: Int, units: Int, chest: Int, village: Int) = listO
 fun QuestsScreen(game: Game) = Sheet(game, "Missions") {
     val s = game.state
     val day = Rules.day(game.now)
-    val ev = Rules.event(game.now)
+    val ev = game.event
     val scope = rememberCoroutineScope()
     Card(border = Gold) {
         T("ÉVÉNEMENT DU JOUR", 10, Gold, FontWeight.Black)
@@ -341,8 +341,8 @@ fun QuestsScreen(game: Game) = Sheet(game, "Missions") {
         T(title, 16, Gold, FontWeight.Black, Modifier.padding(top = 6.dp))
         QUESTS.filter { it.id.startsWith(prefix) }.forEach { q ->
             val p = s.progress(q)
-            val shown = if (q.key == "village") p + 1 else p
-            val goal = if (q.key == "village") q.goal + 1 else q.goal
+            val shown = p
+            val goal = q.goal
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).padding(end = 10.dp)) {
@@ -428,7 +428,7 @@ fun SocialScreen(game: Game) = Sheet(game, "Social") {
                     T("${i + 1}", 16, Gold, FontWeight.Black, Modifier.width(30.dp))
                     Canvas(Modifier.size(34.dp).clip(CircleShape).background(Violet)) { ghost(size.width / 2, size.height * 0.52f, size.width * 0.6f, AVATARS[r.avatar % AVATARS.size], Mood.IDLE, 0f) }
                     Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                        T(r.name, 14, Ink, FontWeight.Bold, lines = 1); T("Monde ${r.village + 1} · ${r.stars} ★", 11, Dim)
+                        T(r.name, 14, Ink, FontWeight.Bold, lines = 1); T("${countryOf(r.village).flag} ${villageName(r.village)} · ${r.stars} ★", 11, Dim)
                     }
                     if (!world && r.id != s.id) GButton(game, "Offrir 3 tours", color = Electric, size = 11) { game.gift(r.id) }
                 }
@@ -481,5 +481,5 @@ fun SettingsScreen(game: Game) = Sheet(game, "Réglages") {
             GButton(game, "Jouer en ligne", Modifier.fillMaxWidth().padding(top = 10.dp), Electric, size = 13) { game.screen = Screen.SOCIAL }
         }
     }
-    T("Ghost Coin 0.1.0", 11, Dim, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
+    T("Ghost Coin 0.2.0", 11, Dim, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
 }

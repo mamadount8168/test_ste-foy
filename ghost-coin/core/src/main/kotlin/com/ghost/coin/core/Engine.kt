@@ -15,6 +15,8 @@ interface World {
     fun raid(self: GameState, target: Target, amount: Long, now: Long) {}
     /** Événements subis par le joueur pendant qu'il joue (robots hors ligne). */
     fun ambient(s: GameState, now: Long, rng: Random, ev: MutableList<Event>): GameState = s
+    /** Événement en cours : celui du calendrier, ou un événement programmé par l'administrateur. */
+    fun event(now: Long): DayEvent = Rules.event(now)
 }
 
 /**
@@ -97,11 +99,12 @@ object Engine {
         return s.copy(coins = s.coins - taken, log = (listOf(entry) + s.log).take(30)) to taken
     }
 
-    fun apply(s0: GameState, a: Action, now: Long, rng: Random, world: World): Result {
+    /** `force` (0..7) impose le symbole des trois rouleaux : réservé au bac à sable, le serveur ne le transmet jamais. */
+    fun apply(s0: GameState, a: Action, now: Long, rng: Random, world: World, force: Int = -1): Result {
         var s = rollover(regen(s0, now), now)
         val ev = mutableListOf<Event>()
         val u = Rules.unit(s.village)
-        val event = Rules.event(now)
+        val event = world.event(now)
         when (a.type) {
             "sync" -> {}
             "bet" -> {
@@ -113,7 +116,7 @@ object Engine {
                 if (s.spins < bet) refuse("Plus assez de tours")
                 s = s.copy(spins = s.spins - bet).count("spin", bet)
                 val roll = rng.nextInt(1000)
-                val triple = when {
+                val triple = if (force in 0..7) Sym.entries[force] else when {
                     roll < 90 -> Sym.ATTACK
                     roll < 140 -> Sym.RAID
                     roll < 200 -> Sym.SHIELD
@@ -226,6 +229,12 @@ object Engine {
                     s = s.copy(village = s.village + 1, levels = List(8) { 0 }, damaged = List(8) { false })
                     ev += Event("villageDone", s.village.toLong())
                     s = s.reward(25, 30, 0, rng, ev)
+                    // Fin de continent : récompense spéciale et cinématique côté application.
+                    val done = CONTINENT_START.indexOf(s.village % COUNTRIES.size)
+                    if (done > 0 || s.village % COUNTRIES.size == 0) {
+                        ev += Event("continentDone", (if (done > 0) done - 1 else Continent.entries.size - 1).toLong())
+                        s = s.reward(100, 500, 2, rng, ev)
+                    }
                 }
             }
             "chest" -> {

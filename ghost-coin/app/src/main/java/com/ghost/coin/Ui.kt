@@ -13,6 +13,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -129,6 +130,7 @@ fun CardView(id: Int, count: Int, modifier: Modifier = Modifier, selected: Boole
 
 // ---------------------------------------------------------------- Accueil
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(game: Game) {
     val s = game.view
@@ -136,11 +138,12 @@ fun HomeScreen(game: Game) {
     val coins by animateFloatAsState(s.coins.toFloat(), tween(700), label = "coins")
     Column(Modifier.fillMaxSize().background(Night).systemBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.clip(CircleShape).clickable { game.screen = Screen.SETTINGS }.padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Appui long sur le profil : accès discret à Ghost Admin.
+            Row(Modifier.clip(CircleShape).combinedClickable(onLongClick = { game.screen = Screen.ADMIN }) { game.screen = Screen.SETTINGS }.padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Canvas(Modifier.size(40.dp).clip(CircleShape).background(Violet)) { ghost(size.width / 2, size.height * 0.52f, size.width * 0.6f, AVATARS[s.avatar], Mood.IDLE, 0f) }
                 Column(Modifier.padding(start = 8.dp)) {
                     T(s.name, 14, Ink, FontWeight.Bold, lines = 1)
-                    T("Monde ${s.village + 1} · ${s.stars} ★", 11, Dim)
+                    T("${countryOf(s.village).flag} Pays ${s.village + 1}/${COUNTRIES.size}", 11, Dim, lines = 1)
                 }
             }
             Spacer(Modifier.weight(1f))
@@ -153,18 +156,20 @@ fun HomeScreen(game: Game) {
                 ghost(size.width * 0.5f, size.height * 0.8f, size.width * 0.15f, AVATARS[s.avatar], game.mood, t)
             }
             Column(Modifier.padding(12.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x99120A26)).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                T(villageName(s.village), 16, Ink, FontWeight.Black)
+                T("${countryOf(s.village).flag} ${villageName(s.village)}", 16, Ink, FontWeight.Black)
+                T("${countryOf(s.village).continent.label} · ${countryOf(s.village).landmark}", 10, Dim, lines = 1, modifier = Modifier.widthIn(max = 190.dp))
                 val built = s.levels.sum()
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Bar(built / 24f, Gold, Modifier.width(110.dp)); T("  $built/24", 11, Dim)
                 }
             }
-            val ev = Rules.event(game.now)
+            val ev = game.event
             Column(
                 Modifier.align(Alignment.TopEnd).padding(12.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x99120A26))
                     .border(1.dp, Gold.copy(alpha = 0.6f), RoundedCornerShape(14.dp)).clickable { game.screen = Screen.QUESTS }.padding(horizontal = 10.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.End,
             ) { T("ÉVÉNEMENT", 9, Gold, FontWeight.Black); T(ev.name, 12, Ink, FontWeight.Bold) }
+            if (game.sandbox) T("GHOST SANDBOX", 11, Color.White, FontWeight.Black, Modifier.align(Alignment.BottomEnd).padding(12.dp).clip(CircleShape).background(Danger).clickable { game.screen = Screen.ADMIN }.padding(horizontal = 10.dp, vertical = 4.dp))
             if (s.voucher) T("Construction −50 %", 11, Night, FontWeight.Black, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(CircleShape).background(Gold).padding(horizontal = 10.dp, vertical = 4.dp))
         }
 
@@ -183,7 +188,7 @@ fun HomeScreen(game: Game) {
             Tile(game, 7, "Missions", if (questDot) -1 else 0, Modifier.weight(1f)) { game.screen = Screen.QUESTS }
             Tile(game, 10, "Boutique", if (game.now >= s.freeChestAt) -1 else 0, Modifier.weight(1f)) { game.screen = Screen.SHOP }
             Tile(game, 11, "Social", if (s.log.any { !it.revenged && it.kind != "gift" && it.kind != "card" }) -1 else 0, Modifier.weight(1f)) { game.screen = Screen.SOCIAL }
-            Tile(game, 8, "Réglages", 0, Modifier.weight(1f)) { game.screen = Screen.SETTINGS }
+            Tile(game, 12, "Monde", 0, Modifier.weight(1f)) { game.screen = Screen.MAP }
         }
     }
 }
@@ -250,7 +255,7 @@ private fun Reel(game: Game, index: Int, modifier: Modifier) {
         if (game.spinId > 0) {
             val base = ceil(pos.value).toInt()
             val delta = ((game.reels[index] - base) % 8 + 8) % 8
-            pos.animateTo((base + 8 * (2 + index) + delta).toFloat(), tween(900 + 350 * index, easing = LinearOutSlowInEasing))
+            pos.animateTo((base + 8 * (2 + index) + delta).toFloat(), tween((900 + 350 * index) / game.speed, easing = LinearOutSlowInEasing))
         }
     }
     val shape = RoundedCornerShape(14.dp)
@@ -316,6 +321,8 @@ fun Overlays(game: Game) {
         }
     }
 
+    Cinematic(game)
+
     // Messages brefs.
     val toast = game.toast
     LaunchedEffect(toast) { if (toast != null) { delay(3200); if (game.toast == toast) game.toast = null } }
@@ -340,6 +347,8 @@ fun GhostCoinApp(game: Game) {
                 Screen.SHOP -> ShopScreen(game)
                 Screen.SOCIAL -> SocialScreen(game)
                 Screen.SETTINGS -> SettingsScreen(game)
+                Screen.MAP -> MapScreen(game)
+                Screen.ADMIN -> AdminScreen(game)
             }
         }
         Overlays(game)

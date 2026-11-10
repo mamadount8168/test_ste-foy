@@ -75,6 +75,33 @@ class EngineTest {
         }
     }
 
+    @Test fun worldHas196CountriesInContinentOrderStartingInSenegal() {
+        assertEquals(196, COUNTRIES.size)
+        assertEquals("Sénégal", COUNTRIES[0].name)
+        assertEquals(listOf(0, 54, 100, 135, 182, 196), CONTINENT_START)
+        assertEquals(196, COUNTRIES.map { it.code }.toSet().size)
+        assertEquals("\uD83C\uDDF8\uD83C\uDDF3", COUNTRIES[0].flag)
+        assertTrue(COUNTRIES.all { it.biome in BIOMES && it.style in STYLES && it.lat in -60..75 && it.lon in -180..180 })
+    }
+
+    @Test fun finishingLastAfricanCountryRewardsTheContinentAndOpensEurope() {
+        val s = GameState(coins = Long.MAX_VALUE / 4, village = 53, levels = List(8) { if (it == 0) 2 else 3 })
+        val r = act(s, "build", 0)
+        assertEquals(54, r.state.village); assertEquals(Continent.EUROPE, countryOf(r.state.village).continent)
+        assertEquals(0L, r.events.first { it.type == "continentDone" }.n)
+        assertTrue(r.state.spins >= 50 + 25 + 100)
+        assertTrue(act(GameState(coins = Long.MAX_VALUE / 4, village = 3, levels = List(8) { if (it == 0) 2 else 3 }), "build", 0).events.none { it.type == "continentDone" })
+    }
+
+    @Test fun forcedReelsAreHonouredForTheSandbox() {
+        val r = Engine.apply(GameState(spinsAt = now), Action("spin"), now, Random(1), BotWorld, force = Sym.RAID.ordinal)
+        assertEquals(List(3) { Sym.RAID.ordinal }, r.events.first { it.type == "reels" }.ids); assertEquals(1, r.state.raids)
+    }
+
+    @Test fun costsStayFiniteAcrossTheWholeWorld() {
+        assertTrue((0 until 800).all { Rules.cost(it, 7, 2) > 0 && Rules.unit(it) > 0 })
+    }
+
     @Test fun cannotDigSameHoleTwice() {
         val s = act(act(GameState(raids = 1), "raid").state, "dig", 0).state
         assertFailsWith<Refused> { act(s, "dig", 0) }

@@ -16,8 +16,8 @@ android {
         applicationId = "com.ghost.coin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
     signingConfigs {
         if (keys.containsKey("storeFile")) create("upload") {
@@ -38,7 +38,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     testOptions { unitTests { isIncludeAndroidResources = true; all { it.systemProperty("roborazzi.test.record", "true") } } }
 }
 
@@ -55,6 +55,7 @@ dependencies {
 dependencies {
     // Rendu des écrans sans appareil (captures vérifiées à l'œil et tests de fumée).
     testImplementation("junit:junit:4.13.2")
+    testImplementation(project(":server"))
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.43.1")
     testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.43.1")
