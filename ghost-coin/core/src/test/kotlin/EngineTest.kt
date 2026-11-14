@@ -187,4 +187,47 @@ class EngineTest {
         println("3 mondes terminés en $spins tours")
         assertTrue(spins in 60..3000, "3 mondes en $spins tours")
     }
+
+    @Test fun everySpinPaysSomething() {
+        repeat(300) { seed ->
+            val r = act(GameState(spinsAt = now), "spin", rng = Random(seed))
+            assertTrue(r.events.any { it.type in setOf("coins", "spins", "shield", "voucher", "attackCharge", "raidCharge") }, "tour sans gain (graine $seed)")
+        }
+    }
+
+    @Test fun petsUnlockAndBoostRaidsAndAttacks() {
+        assertFailsWith<Refused> { act(GameState(), "pet", 0) }
+        val lion = act(GameState(village = 2, raids = 1), "pet", 0).state
+        assertEquals(0, lion.pet)
+        val plain = act(GameState(village = 2, raids = 1), "raid", rng = Random(5)).state.raidPot
+        assertEquals(plain * 130 / 100, act(lion, "raid", rng = Random(5)).state.raidPot)
+        assertFailsWith<Refused> { act(lion, "pet", 2) }
+        assertEquals(-1, act(lion, "pet", -1).state.pet)
+    }
+
+    @Test fun turtleSometimesBlocksWithoutShield() {
+        val s = GameState(shields = 0, pet = 2, levels = List(8) { 1 })
+        assertTrue(Engine.sufferAttack(s, "X", "bot:1", 0, now, roll = 10).second)
+        val (hit, blocked) = Engine.sufferAttack(s, "X", "bot:1", 0, now, roll = 80)
+        assertFalse(blocked); assertTrue(hit.damaged[0])
+    }
+
+    @Test fun raidsAlwaysDropCards() {
+        var s = act(GameState(raids = 1), "raid").state
+        var cards = 0
+        for (h in 0..2) { val r = act(s, "dig", h); s = r.state; cards += r.events.filter { it.type == "cards" }.sumOf { it.ids.size } }
+        assertTrue(cards == 1 || cards == 3); assertEquals(cards, s.cards.values.sum())
+    }
+
+    @Test fun timedChallengeTracksProgressRewardsOnceAndResets() {
+        val start = Rules.challengeId(now) * Rules.CHALLENGE_DAYS * Rules.DAY + 1000
+        val c = Rules.challenge(start)
+        assertFailsWith<Refused> { act(GameState(), "challenge", t = start) }
+        val done = act(GameState(), "sync", t = start).state.copy(chal = mapOf(c.key to c.goal))
+        val r = act(done, "challenge", t = start)
+        assertTrue(r.state.spins >= 50 + 60); assertTrue(r.state.challengeClaimed)
+        assertFailsWith<Refused> { act(r.state, "challenge", t = start) }
+        val next = act(r.state, "sync", t = Rules.challengeEnd(start) + 1).state
+        assertFalse(next.challengeClaimed); assertTrue(next.chal.isEmpty())
+    }
 }

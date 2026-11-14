@@ -541,6 +541,40 @@ fun DrawScope.villageScene(village: Int, levels: List<Int>, damaged: List<Boolea
     }
 }
 
+/** Familiers : 0 lion, 1 aigle, 2 tortue. Dessinés comme le fantôme, ronds et expressifs. */
+fun DrawScope.pet(kind: Int, x: Float, yy: Float, s: Float, t: Float) {
+    val y = yy + sin(t * 3f + kind) * s * 0.06f
+    val dark = Color(0xFF1B0F33)
+    drawOval(Color.Black.copy(alpha = 0.25f), Offset(x - s * 0.8f, yy + s * 0.75f), Size(s * 1.6f, s * 0.3f))
+    when (kind) {
+        0 -> { // lion
+            drawPath(Path().apply { moveTo(x + s * 0.6f, y + s * 0.4f); quadraticTo(x + s * 1.3f, y + s * 0.2f, x + s * 1.1f, y - s * 0.3f) }, Color(0xFFE0A030), style = Stroke(s * 0.12f, cap = StrokeCap.Round)); drawCircle(Color(0xFF8A4A12), s * 0.14f, Offset(x + s * 1.1f, y - s * 0.33f))
+            drawOval(Color(0xFFE8B040), Offset(x - s * 0.6f, y + s * 0.05f), Size(s * 1.3f, s * 0.8f))
+            for (i in 0 until 12) { val a = i * 0.524f + sin(t * 2f) * 0.05f; drawCircle(Color(0xFFB8641A), s * 0.24f, Offset(x - s * 0.15f + cos(a) * s * 0.55f, y - s * 0.25f + sin(a) * s * 0.55f)) }
+            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFE08A), Color(0xFFE8B040)), Offset(x - s * 0.25f, y - s * 0.4f), s), s * 0.5f, Offset(x - s * 0.15f, y - s * 0.25f))
+            for (d in listOf(-1f, 1f)) { drawCircle(dark, s * 0.07f, Offset(x - s * 0.15f + d * s * 0.2f, y - s * 0.32f)); drawCircle(Color.White, s * 0.025f, Offset(x - s * 0.13f + d * s * 0.2f, y - s * 0.35f)) }
+            drawCircle(Color(0xFF8A4A12), s * 0.07f, Offset(x - s * 0.15f, y - s * 0.15f)); drawArc(dark, 20f, 140f, false, Offset(x - s * 0.27f, y - s * 0.2f), Size(s * 0.24f, s * 0.18f), style = Stroke(s * 0.04f, cap = StrokeCap.Round))
+        }
+        1 -> { // aigle
+            val flap = sin(t * 6f) * 25f
+            for (d in listOf(-1f, 1f)) rotate(d * (20f + flap), Offset(x, y)) { drawOval(Color(0xFF6B4226), Offset(if (d < 0) x - s * 1.1f else x + s * 0.1f, y - s * 0.2f), Size(s, s * 0.45f)) }
+            drawOval(Color(0xFF8A5A33), Offset(x - s * 0.4f, y - s * 0.3f), Size(s * 0.8f, s * 1.0f))
+            drawCircle(Color.White, s * 0.36f, Offset(x, y - s * 0.4f))
+            drawPath(poly(x - s * 0.1f, y - s * 0.36f, x + s * 0.1f, y - s * 0.36f, x, y - s * 0.12f), Gold)
+            for (d in listOf(-1f, 1f)) drawCircle(dark, s * 0.06f, Offset(x + d * s * 0.15f, y - s * 0.46f))
+            for (d in listOf(-1f, 1f)) drawLine(Gold, Offset(x + d * s * 0.15f, y + s * 0.65f), Offset(x + d * s * 0.15f, y + s * 0.82f), s * 0.07f, StrokeCap.Round)
+        }
+        else -> { // tortue
+            for (d in listOf(-1f, 1f)) drawOval(Color(0xFF7BC87A), Offset(x + d * s * 0.5f - s * 0.18f, y + s * 0.4f + sin(t * 4f + d) * s * 0.04f), Size(s * 0.36f, s * 0.3f))
+            drawCircle(Color(0xFF8FDB8A), s * 0.28f, Offset(x - s * 0.75f, y + s * 0.15f))
+            drawCircle(dark, s * 0.05f, Offset(x - s * 0.85f, y + s * 0.1f)); drawArc(dark, 20f, 120f, false, Offset(x - s * 0.95f, y + s * 0.12f), Size(s * 0.2f, s * 0.14f), style = Stroke(s * 0.035f, cap = StrokeCap.Round))
+            drawArc(Brush.verticalGradient(listOf(Color(0xFF5AD0C0), Color(0xFF1F8F8A)), y - s * 0.6f, y + s * 0.5f), 180f, 180f, true, Offset(x - s * 0.65f, y - s * 0.55f), Size(s * 1.3f, s * 2.1f))
+            for (i in 0 until 3) drawCircle(Color(0xFFBFF6E8).copy(alpha = 0.7f), s * 0.13f, Offset(x - s * 0.3f + i * s * 0.3f, y - s * (0.1f + (i % 2) * 0.2f)))
+            drawArc(Color.White.copy(alpha = 0.5f), 200f, 100f, false, Offset(x - s * 0.5f, y - s * 0.45f), Size(s, s * 1.2f), style = Stroke(s * 0.05f, cap = StrokeCap.Round))
+        }
+    }
+}
+
 /** Petit habitant qui marche : jambes animées, vêtement aux couleurs du pays. */
 fun DrawScope.villager(x: Float, y: Float, s: Float, cloth: Color, tone: Int, phase: Float, dir: Float) {
     val skin = listOf(Color(0xFF6B4226), Color(0xFFB47B4E), Color(0xFFE2B48A), Color(0xFF8D5A3B))[tone % 4]

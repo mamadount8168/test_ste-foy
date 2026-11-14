@@ -50,7 +50,7 @@ class ScreensTest {
     private fun settle(ms: Long = 1500) { Thread.sleep(250); rule.mainClock.advanceTimeBy(ms); rule.waitForIdle() }
 
     private val rich = GameState(
-        name = "Lueur", avatar = 2, village = 1, coins = 1_234_567, spins = 37, spinsAt = System.currentTimeMillis(), shields = 2, attacks = 1, raids = 2,
+        name = "Lueur", avatar = 2, village = 1, pet = 0, coins = 1_234_567, spins = 37, spinsAt = System.currentTimeMillis(), shields = 2, attacks = 1, raids = 2,
         levels = listOf(3, 2, 1, 3, 0, 2, 1, 3), damaged = List(8) { it == 1 }, stars = 39,
         cards = (0 until 48).filter { it % 3 != 1 }.associateWith { 1 + it % 3 },
         daily = mapOf("spin" to 30, "build" to 2), weekly = mapOf("spin" to 120),
@@ -96,6 +96,7 @@ class ScreensTest {
         repeat(4) { settle(600) }
         assertEquals(null, game.state.target)
         assertTrue(game.state.coins > 20_000)
+        rule.runOnUiThread { game.reveal = null }; settle()
         rule.onNodeWithText("Continuer").performClick(); settle()
         assertEquals(Screen.HOME, game.screen)
     }
@@ -107,12 +108,13 @@ class ScreensTest {
         for (h in 0..2) { rule.onNodeWithTag("dig-$h").performClick(); settle() }
         assertEquals(null, game.state.target)
         assertEquals(1L, game.state.stats["raid"])
+        rule.runOnUiThread { game.reveal = null }; settle()
         rule.onNodeWithText("Continuer").performClick(); settle()
         assertEquals(Screen.HOME, game.screen)
     }
 
     @Test fun rendersWorldMapAdminAndCountryVillages() {
-        launch(rich.copy(village = 57, levels = listOf(3, 2, 1, 2, 0, 2, 1, 3)))
+        launch(rich.copy(pet = 0, village = 57, levels = listOf(3, 2, 1, 2, 0, 2, 1, 3)))
         rule.runOnUiThread { game.screen = Screen.MAP }; settle(2500)
         rule.onRoot().captureRoboImage("build/shots/MAP.png")
         rule.runOnUiThread { game.screen = Screen.ADMIN }; settle()
@@ -142,6 +144,19 @@ class ScreensTest {
             }
         }
         rule.onRoot().captureRoboImage("build/shots/COUNTRIES.png")
+    }
+
+    @Test fun petCanBeChosenAndChallengeClaimed() {
+        val c = Rules.challenge(System.currentTimeMillis())
+        launch(GameState(village = 2, challengeId = Rules.challengeId(System.currentTimeMillis()), chal = mapOf(c.key to c.goal)))
+        rule.runOnUiThread { game.screen = Screen.CARDS }; settle()
+        rule.onNodeWithTag("pet-0").performClick(); settle()
+        assertEquals(0, game.state.pet)
+        rule.onRoot().captureRoboImage("build/shots/PETS.png")
+        rule.runOnUiThread { game.screen = Screen.QUESTS }; settle()
+        rule.onRoot().captureRoboImage("build/shots/CHALLENGE.png")
+        rule.onNodeWithTag("challenge").performClick(); settle()
+        assertTrue(game.state.challengeClaimed)
     }
 
     @Test fun sandboxIsIsolatedFromTheRealGameAndHonoursCheats() {

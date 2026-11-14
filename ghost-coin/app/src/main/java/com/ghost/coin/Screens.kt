@@ -129,7 +129,7 @@ fun AttackScreen(game: Game) {
             blocked = e.m > 0; gain = r.events.firstOrNull { it.type == "coins" }?.n ?: 0; struck = b
             kotlinx.coroutines.delay(280); game.sfx(Sfx.ATTACK)
             anim.animateTo(1f, tween(1300, easing = LinearEasing))
-            game.play(r.events.filter { it.type == "coins" }); done = true
+            game.play(r.events.filter { it.type == "coins" || it.type == "cards" }); done = true
         }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -220,6 +220,7 @@ fun RaidScreen(game: Game) {
                             found[h] = e.n; shownAt[h] = time.value
                             if (e.n > 0) { game.burst++; game.sfx(Sfx.CHEST); game.feel(Mood.WIN) } else game.sfx(Sfx.LOSE)
                             done = e.ids.firstOrNull() == 1
+                            game.play(r.events.filter { it.type == "cards" })
                         }
                         waiting = false
                     }
@@ -263,6 +264,27 @@ fun CardsScreen(game: Game) {
                     }
                 }
             }
+            // Familiers : un seul accompagne le fantôme et donne son bonus.
+            val time = rememberTime()
+            T("Familiers", 20, Ink, FontWeight.Black, shadow = true)
+            PETS.forEachIndexed { i, p ->
+                val open = s.petUnlocked(i)
+                Card(Modifier.testTag("pet-$i").clickable(enabled = open) { game.act("pet", if (s.pet == i) -1 else i) }, if (s.pet == i) Gold else Color.Transparent) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Canvas(Modifier.size(76.dp).clip(RoundedCornerShape(20.dp)).background(Brush.radialGradient(listOf(Color(0xFFB9A2FF), Color(0xFF4A22B8))))) {
+                            pet(i, size.width / 2, size.height * 0.5f, size.width * 0.3f, time.value)
+                            if (!open) drawRect(Color(0xCC301580))
+                        }
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            T(p.name, 17, Ink, FontWeight.Black)
+                            T(p.text, 14, if (open) Gold else Dim, FontWeight.Bold)
+                            if (!open) T(p.unlock, 13, Dim)
+                        }
+                        T(if (s.pet == i) "ACTIF" else if (open) "Choisir" else "🔒", 14, if (s.pet == i) Gold else Ink, FontWeight.Black)
+                    }
+                }
+            }
+            T("Albums", 20, Ink, FontWeight.Black, shadow = true)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ALBUMS.forEachIndexed { i, name ->
                     val n = (0 until ALBUM_SIZE).count { (s.cards[i * ALBUM_SIZE + it] ?: 0) > 0 }
@@ -360,6 +382,21 @@ fun QuestsScreen(game: Game) = Sheet(game, "Missions") {
     Card(border = Gold) {
         T("ÉVÉNEMENT DU JOUR", 10, Gold, FontWeight.Black)
         T(ev.name, 18, Ink, FontWeight.Black); T(ev.text, 13, Dim)
+    }
+    Card(border = Electric) {
+        val c = Rules.challenge(game.now)
+        val p = if (s.challengeId == Rules.challengeId(game.now)) s.chal[c.key] ?: 0 else 0
+        val claimed = s.challengeClaimed && s.challengeId == Rules.challengeId(game.now)
+        val left = Rules.challengeEnd(game.now) - game.now
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            T("DÉFI ÉCLAIR", 13, Color(0xFFBFF0FF), FontWeight.Black, Modifier.weight(1f))
+            T("encore %d h %02d".format(left / 3_600_000, left / 60_000 % 60), 13, Ink, FontWeight.Bold)
+        }
+        T(c.label, 20, Ink, FontWeight.Black)
+        Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Bar(p.toFloat() / c.goal, Electric, Modifier.weight(1f)); T("  ${minOf(p, c.goal)}/${c.goal}", 14, Ink, FontWeight.Bold) }
+        T("Récompense : 60 tours, ${fmt(Rules.unit(s.village) * 150)} pièces et un Coffre d'or", 14, Gold, FontWeight.Bold)
+        if (claimed) T("Récompense récupérée. Prochain défi bientôt.", 14, Dim)
+        else GButton(game, "Récupérer la récompense", Modifier.testTag("challenge").fillMaxWidth().padding(top = 8.dp), Electric, p >= c.goal, 16) { game.act("challenge") }
     }
     Card {
         val next = if (s.dailyDay == day - 1 || s.dailyDay == day) (if (s.dailyDay == day) s.dailyStreak else s.dailyStreak % 7 + 1) else 1
@@ -558,5 +595,5 @@ fun SettingsScreen(game: Game) = Sheet(game, "Profil") {
             GButton(game, "Jouer en ligne", Modifier.fillMaxWidth().padding(top = 10.dp), Electric, size = 13) { game.screen = Screen.SOCIAL }
         }
     }
-    T("Ghost Coin 0.3.0", 11, Dim, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
+    T("Ghost Coin 0.4.0", 11, Dim, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
 }

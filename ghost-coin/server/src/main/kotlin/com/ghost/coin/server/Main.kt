@@ -109,7 +109,7 @@ class GameServer(private val dir: File, port: Int, private val adminPassword: St
 
         override fun attack(self: GameState, target: Target, building: Int, now: Long, rng: Random): Boolean {
             val a = real(target.id) ?: return BotWorld.attack(self, target, building, now, rng)
-            val (s, blocked) = Engine.sufferAttack(a.state, self.name, selfId, building, now)
+            val (s, blocked) = Engine.sufferAttack(a.state, self.name, selfId, building, now, rng.nextInt(100))
             save(a.copy(state = s, lastHitAt = now))
             return blocked
         }

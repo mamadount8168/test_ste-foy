@@ -84,10 +84,31 @@ val EVENTS = listOf(
     DayEvent("Pluie de cartes", "Le coffre gratuit contient 5 cartes au lieu de 3", freeCards = 5),
 )
 
+/** Familier : compagnon actif qui donne un bonus permanent. */
+class Pet(val name: String, val text: String, val unlock: String)
+
+val PETS = listOf(
+    Pet("Téranga le lion", "Butin des raids +30 %", "Arrive au 3ᵉ pays du voyage"),
+    Pet("Alizé l'aigle", "Pièces des attaques +30 %", "Arrive avec 1 album terminé"),
+    Pet("Corail la tortue", "1 chance sur 4 de repousser une attaque sans bouclier", "Arrive avec 3 albums terminés"),
+)
+
+/** Défi à durée limitée : un objectif pour deux jours, une grosse récompense. */
+class Challenge(val key: String, val label: String, val goal: Int)
+
+val CHALLENGES = listOf(
+    Challenge("spin", "Lancer 150 tours", 150), Challenge("raid", "Mener 6 raids", 6),
+    Challenge("build", "Réaliser 12 améliorations", 12), Challenge("attack", "Réussir 10 attaques", 10),
+)
+
 object Rules {
+    const val CHALLENGE_DAYS = 2L
+    fun challengeId(now: Long) = day(now) / CHALLENGE_DAYS
+    fun challenge(now: Long) = CHALLENGES[(challengeId(now) % CHALLENGES.size).toInt()]
+    fun challengeEnd(now: Long) = (challengeId(now) + 1) * CHALLENGE_DAYS * DAY
     const val MAX_LEVEL = 3
     const val MAX_SPINS = 50
-    const val REGEN_MS = 6 * 60_000L
+    const val REGEN_MS = 12 * 60_000L // 5 tours par heure : la réserve se remplit en 10 heures
     const val MAX_SHIELDS = 3
     const val MAX_CHARGES = 10
     const val DAY = 86_400_000L
@@ -157,9 +178,15 @@ data class GameState(
     val raidStolen: Long = 0,
     val log: List<LogEntry> = emptyList(),
     val seq: Long = 0,
+    val pet: Int = -1,
+    val challengeId: Long = -1,
+    val chal: Map<String, Int> = emptyMap(),
+    val challengeClaimed: Boolean = false,
     /** Compte de test créé par Ghost Admin (toujours affiché comme tel). */
     val test: Boolean = false,
 ) {
+    fun petUnlocked(i: Int) = when (i) { 0 -> village >= 2; 1 -> albums.isNotEmpty(); 2 -> albums.size >= 3; else -> false }
+
     fun progress(q: Quest): Int = when {
         q.key == "village" -> village
         q.key == "cards" -> cards.size

@@ -210,6 +210,7 @@ fun HomeScreen(game: Game) {
         Canvas(Modifier.fillMaxSize().padding(bottom = 264.dp + nav)) {
             val t = time.value
             villageScene(s.village, s.levels, s.damaged, t)
+            if (s.pet >= 0) pet(s.pet, size.width * 0.3f, size.height * 0.86f, size.width * 0.075f, t)
             ghost(size.width * 0.5f, size.height * 0.84f, size.width * 0.17f, AVATARS[s.avatar], game.mood, t)
             drawRect(Brush.verticalGradient(listOf(Color(0x66140830), Color.Transparent), 0f, size.height * 0.2f), size = Size(size.width, size.height * 0.2f))
         }

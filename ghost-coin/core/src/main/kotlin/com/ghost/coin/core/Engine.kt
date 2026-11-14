@@ -39,6 +39,7 @@ object Engine {
         val week = (day + 3) / 7
         var r = s
         if (r.questDay != day) r = r.copy(questDay = day, daily = emptyMap(), claimed = r.claimed.filterNot { it.startsWith("d:") }.toSet())
+        if (r.challengeId != Rules.challengeId(now)) r = r.copy(challengeId = Rules.challengeId(now), chal = emptyMap(), challengeClaimed = false)
         if (r.questWeek != week) r = r.copy(questWeek = week, weekly = emptyMap(), claimed = r.claimed.filterNot { it.startsWith("w:") }.toSet())
         return r
     }
@@ -47,6 +48,7 @@ object Engine {
         daily = daily + (key to (daily[key] ?: 0) + n),
         weekly = weekly + (key to (weekly[key] ?: 0) + n),
         stats = stats + (key to (stats[key] ?: 0) + n),
+        chal = chal + (key to (chal[key] ?: 0) + n),
     )
 
     private fun GameState.gain(amount: Long, ev: MutableList<Event>): GameState {
@@ -80,13 +82,16 @@ object Engine {
         return s
     }
 
-    /** Le joueur `s` subit une attaque. Renvoie le nouvel état et true si un bouclier a bloqué. */
-    fun sufferAttack(s: GameState, by: String, byId: String, building: Int, now: Long): Pair<GameState, Boolean> {
-        val blocked = s.shields > 0
+    /**
+     * Le joueur `s` subit une attaque. Renvoie le nouvel état et true si elle a été bloquée, par un bouclier
+     * ou, sans bouclier, par la tortue (`roll` : tirage de 0 à 99 fourni par l'appelant).
+     */
+    fun sufferAttack(s: GameState, by: String, byId: String, building: Int, now: Long, roll: Int = 100): Pair<GameState, Boolean> {
+        val blocked = s.shields > 0 || s.pet == 2 && roll < 25
         val hit = !blocked && s.levels.getOrElse(building) { 0 } > 0
         val entry = LogEntry(by, byId, "attack", building.toLong(), blocked, now)
         return s.copy(
-            shields = if (blocked) s.shields - 1 else s.shields,
+            shields = maxOf(0, s.shields - 1),
             damaged = if (hit) s.damaged.mapIndexed { i, d -> d || i == building } else s.damaged,
             log = (listOf(entry) + s.log).take(30),
         ) to blocked
@@ -153,7 +158,8 @@ object Engine {
                     Sym.BAG -> s = s.gain(coins(80), ev)
                     null -> {
                         val units = reels.sumOf { if (it == Sym.COIN) 1 else if (it == Sym.BAG) 3 else 0 as Int }
-                        if (units > 0) s = s.gain(coins(units), ev)
+                        // Aucun tour perdu : sans pièce ni sac, la machine verse quand même une petite somme.
+                        s = s.gain(if (units > 0) coins(units) else coins(1) / 2, ev)
                     }
                 }
                 s = world.ambient(s, now, rng, ev)
@@ -174,7 +180,7 @@ object Engine {
                     if (i >= 0) s = s.copy(log = s.log.mapIndexed { k, e -> if (k == i) e.copy(revenged = true) else e })
                 }
                 if (a.type == "raid") {
-                    val pot = maxOf(u * 20, minOf(t.coins / 4, u * 200)) * event.raid / 100
+                    val pot = maxOf(u * 20, minOf(t.coins / 4, u * 200)) * event.raid / 100 * (if (s.pet == 0) 130 else 100) / 100
                     s = s.copy(raidPot = pot, raidShares = listOf(50, 30, 20), raidPicked = emptyList(), raidEmpty = false, raidStolen = 0)
                 }
                 ev += Event("target", text = a.type)
@@ -186,7 +192,8 @@ object Engine {
                 val blocked = world.attack(s, t, a.i, now, rng)
                 s = s.copy(target = null, targetKind = "").count("attack")
                 ev += Event("attackResult", m = if (blocked) 1 else 0, ids = listOf(a.i))
-                s = s.gain(u * (if (blocked) 12 else 40) * event.attack / 100, ev)
+                s = s.gain(u * (if (blocked) 12 else 40) * event.attack / 100 * (if (s.pet == 1) 130 else 100) / 100, ev)
+                if (rng.nextInt(100) < 35) s = s.draw(1, CHESTS[0].odds, rng, ev) // une carte tombe parfois des décombres
             }
             "dig" -> {
                 val t = s.target
@@ -208,6 +215,8 @@ object Engine {
                 if (done) {
                     world.raid(s, t, s.raidStolen, now)
                     s = s.copy(target = null, targetKind = "").count("raid")
+                    // Cartes trouvées dans le trésor : une par raid, trois pour un raid parfait.
+                    s = s.draw(if (s.raidEmpty) 1 else 3, CHESTS[1].odds, rng, ev)
                 }
             }
             "build" -> {
@@ -285,6 +294,16 @@ object Engine {
                 if (extra < 1) refuse("Aucun double à échanger")
                 s = s.copy(cards = s.cards + (a.i to 1)).gain(u * Rules.SELL[rarityOf(a.i)] * extra, ev)
             }
+            "pet" -> {
+                if (a.i != -1 && !s.petUnlocked(a.i)) refuse("Ce familier n'est pas encore arrivé")
+                s = s.copy(pet = a.i)
+            }
+            "challenge" -> {
+                val c = Rules.challenge(now)
+                if (s.challengeClaimed) refuse("Récompense du défi déjà récupérée")
+                if ((s.chal[c.key] ?: 0) < c.goal) refuse("Défi non terminé")
+                s = s.copy(challengeClaimed = true).reward(60, 150, 2, rng, ev)
+            }
             "profile" -> {
                 val name = a.s.trim().filter { it.isLetterOrDigit() || it in " _-" }.take(16)
                 if (name.length < 3) refuse("Pseudo trop court (3 caractères minimum)")
@@ -327,7 +346,7 @@ object BotWorld : World {
             val built = s.levels.indices.filter { s.levels[it] > 0 && !s.damaged[it] }
             if (built.isEmpty()) return s
             val b = built.random(rng)
-            val (r, blocked) = Engine.sufferAttack(s, by.name, by.id, b, now)
+            val (r, blocked) = Engine.sufferAttack(s, by.name, by.id, b, now, rng.nextInt(100))
             ev += Event("hit", b.toLong(), if (blocked) 1 else 0, text = by.name)
             return r
         }
